@@ -1,139 +1,56 @@
-# SPEC.md
+# Product specification
 
-## Product
+## Current status
 
-A single-user web app for maintaining a personal video game library.
+The initial in-memory version is implemented. EC2 deployment (Phase 7) is complete, as confirmed by the project owner. Persistent storage and metadata integration remain planned.
 
-The app must support adding, viewing, editing, and deleting games. It has no login or multi-user features.
+A single-user personal game library with no authentication. The server owns the library; browser refreshes retain records, but restarting the server clears them. Development starts with six fictional games; production starts empty.
 
-## Core game model
+## Implemented data model
 
-```ts
-type GameStatus =
-  | "Unplayed"
-  | "Playing"
-  | "Completed"
-  | "Backlog"
-  | "Dropped";
+The canonical types and validation are in `src/lib/game.ts`.
 
-type Cover =
-  | { type: "upload"; url: string }
-  | { type: "url"; url: string }
-  | { type: "api"; url: string }
-  | { type: "placeholder" };
+| Field                          | Current behavior                                                                                                                 |
+| ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------- |
+| `id`, `createdAt`, `updatedAt` | Server-generated UUID and ISO timestamps                                                                                         |
+| `title`                        | Required, trimmed, up to 160 characters                                                                                          |
+| `platforms`, `tags`            | Arrays, default empty; up to 30 entries each, 1–60 characters per entry; trimmed and deduplicated case-insensitively             |
+| `status`                       | Unplayed (default), Playing, Completed, Backlog or Dropped                                                                       |
+| `releaseDate`                  | Optional valid calendar date in `YYYY-MM-DD` format                                                                              |
+| `playtimeMinutes`              | Optional non-negative safe integer; entered and displayed as hours/minutes                                                       |
+| `rating`                       | Optional integer from 1 to 10                                                                                                    |
+| `review`                       | Optional trimmed text, up to 10,000 characters                                                                                   |
+| `cover`                        | Defaults to `{ type: "placeholder" }`; also accepts `{ type: "url", url: string }` with an HTTP/HTTPS URL up to 2,048 characters |
 
-type Game = {
-  id: string;
-  title: string;
-  platforms: string[];
-  tags: string[];
-  releaseDate?: string;      // ISO date
-  status: GameStatus;        // default: Unplayed
-  playtimeMinutes?: number;  // stored as total minutes
-  rating?: number;           // integer 1-10
-  review?: string;
-  cover: Cover;
-  createdAt: string;
-  updatedAt: string;
-};
-```
+Matching normalized titles identify the same game regardless of platform. Comparison uses Unicode NFKC normalization, trimmed/collapsed whitespace and lowercase. Duplicate titles are rejected; additional platforms belong on the existing record. Tags combine genres and user-defined labels. Forms accept comma-separated platforms and tags.
 
-Rules:
+Optional release date, playtime, rating and review can be cleared. API updates use `null` to clear them.
 
-- A game is unique regardless of platform.
-- `platforms` is multi-value.
-- `tags` is one multi-value field for genres and user-defined tags.
-- Release date, playtime, rating, and review are optional.
-- Rating accepts integers from 1 to 10.
-- Playtime is stored in minutes and displayed as hours/minutes.
-- New games default to `Unplayed`.
+## Implemented interactions
 
-## Library views
+- Grid shows cover, title, platforms, status and optional rating.
+- List adds tags, playtime and release date; secondary metadata is hidden on narrower screens.
+- Kanban has five status columns with filtered counts. Dragging or using a card's status selector updates through the normal API. The UI moves immediately and restores the previous record if saving fails.
+- Clicking a game opens a detail dialog. Add, edit and delete confirmation use the same dialog system; there are no per-game pages. Successful creation/editing returns to details.
+- Loading, empty, no-match, saving and error states are implemented, with a reload action for library errors.
 
-The Home page supports three switchable views:
+## Implemented search, filters and sorting
 
-### Grid
-Cover-focused responsive cards.
+All views use the same browser-side query over fetched records. Kanban sorts within each column.
 
-### List
-Compact rows showing cover, title, platforms, tags, status, rating, playtime, and release date where available.
+- Search is a case-insensitive substring match on titles only.
+- Status, platform, tag and exact rating filters combine with AND. Each filter selects one value. Platform/tag options come from the library and match stored labels exactly.
+- Default sort is recently added. Title sorts alphabetically; release date and timestamps sort newest first; rating and playtime sort highest first. Unset values come last, with title as the tiebreaker.
+- View, search and filter settings are not persisted across page reloads.
 
-### Kanban
-Five columns, one for each status.
+## Covers and planned features
 
-Cards can be dragged between columns. Dropping a card immediately updates its status.
+Implemented covers are a bundled SVG placeholder and browser-loaded external URLs. Failed images fall back to the placeholder. Upload appears only as a disabled form option.
 
-## Game interactions
+The TypeScript `Cover` type also includes `upload` and `api`, but current input validation rejects both. There is no upload endpoint or metadata search.
 
-- Clicking a game opens a centered floating detail card/dialog.
-- The detail dialog includes an Edit action.
-- Edit mode uses the same dialog rather than navigating to a separate page.
-- `Add Game` opens a large creation dialog.
-- Delete requires confirmation.
-
-## Search, filter, sort
-
-Search:
-
-- Title only
-
-Filters:
-
-- Status
-- Platform
-- Tag
-- Rating
-
-Sorting:
-
-- Title
-- Release date
-- Rating
-- Playtime
-- Recently added
-- Recently updated
-
-Search, filters, and sorting apply consistently across Grid, List, and Kanban where practical.
-
-## Cover images
-
-Supported sources:
-
-- User upload
-- External URL
-- External game API
-- Local placeholder
-
-For the final storage version:
-
-- Uploaded files are stored in Amazon S3.
-- Manual URLs stay remote.
-- API image URLs stay remote.
-- Placeholder assets are bundled with the app.
-
-## Metadata autofill
-
-External metadata autofill is optional.
-
-RAWG is the likely provider, but the app must remain fully usable without it. Manual entry is always supported.
-
-If implemented, API metadata may populate fields such as title, platforms, tags, release date, and cover image. The user can edit imported values before saving.
-
-## Responsive behavior
-
-Desktop-first, but usable on phones and tablets.
-
-- Grid reduces column count as width decreases.
-- List becomes more compact on narrow screens.
-- Kanban scrolls horizontally on narrow screens.
-- Dialogs fit within the viewport and become near-full-screen on small devices.
+Planned work is SQLite game storage on EBS-backed EC2 storage, S3 uploads, and optional server-side RAWG autofill with editable imported values. Manual entry must remain available.
 
 ## Out of scope
 
-- Authentication
-- Multiple users
-- Social features
-- Recommendations
-- Store integrations
-- Cloud sync across accounts
-- Dedicated per-game pages
+Authentication, multiple users, social features, recommendations, store integrations, account sync and dedicated game pages.

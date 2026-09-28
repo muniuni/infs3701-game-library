@@ -1,150 +1,58 @@
-# ARCHITECTURE.md
+# Architecture
 
-## Stack
+## Implemented stack and deployment
 
-- Next.js
-- React
-- Tailwind CSS
-- shadcn/ui
-- AWS EC2
+Next.js 16 App Router, React 19, TypeScript, Tailwind CSS 4, locally styled shadcn/ui Button/Dialog components using Radix, and Zod validation. Fonts are bundled through Fontsource.
 
-The app runs as a single Next.js service on one EC2 instance for the assignment.
-
-## Deployment stages
-
-### Stage 1: initial deploy
+**Phase 7 EC2 deployment is complete**, as confirmed by the project owner. The deployment environment is Amazon Linux 2023; the repository path on EC2 is `/home/ec2-user/infs3701-game-library`. The production build was reported successful.
 
 ```text
-Browser
-  |
-HTTP
-  |
-EC2
-  |
-Next.js app
-  |
-In-memory game repository
+Browser → HTTP → EC2 → Next.js → InMemoryGameRepository
 ```
 
-The first version keeps game data in memory. This is intentionally temporary so UI, CRUD, routing, and EC2 deployment can be completed before storage is added.
+The deployment instructions use Nginx on port 80 and systemd to run one Next.js process on `127.0.0.1:3000` with Node.js 24. These host configurations and public-address evidence are not checked into this repository; completion is owner-reported, not a live infrastructure audit.
 
-Data resets when the process restarts.
+The repository's `npm start` command itself runs `next start --hostname 0.0.0.0` (default port 3000). `npm run build` uses webpack. The declared Node.js minimum is 20.9.0.
 
-### Stage 2: final storage architecture
+## Implemented code boundaries
 
-```text
-Browser
-  |
-HTTP
-  |
-EC2
-  |
-Next.js app
-  | \
-  |  \ uploaded covers
-  |   -> Amazon S3
-  |
-  -> SQLite database on EBS
-```
+| Location                              | Responsibility                                                           |
+| ------------------------------------- | ------------------------------------------------------------------------ |
+| `src/app/page.tsx`, `src/components/` | Client library, views, forms and dialogs                                 |
+| `src/lib/game.ts`                     | Domain types, shared create/update schemas and playtime formatting       |
+| `src/lib/library-query.ts`            | Browser-side search, filters and sorting                                 |
+| `src/app/api/games/`                  | Node.js CRUD route handlers                                              |
+| `src/lib/repository.ts`               | Async `GameRepository` interface and Map-backed `InMemoryGameRepository` |
+| `src/lib/server-repository.ts`        | Process-wide repository instance stored on `globalThis`                  |
+| `src/lib/seed.ts`                     | Six fictional development fixtures                                       |
 
-Final responsibilities:
+Repository operations are `listGames`, `getGame`, `createGame`, `updateGame` and `deleteGame`. Returned records are cloned to prevent callers mutating storage. The server creates IDs/timestamps, validates input and enforces normalized-title uniqueness.
 
-- EC2 runs the application and server-side CRUD logic.
-- SQLite stores game metadata.
-- The SQLite database file lives on EBS-backed EC2 storage.
-- S3 stores user-uploaded cover images.
-- Remote cover URLs remain remote and are stored only as URLs.
+The shared instance survives development module reloads but not process restarts. Production starts empty. Run one process; separate instances do not share records. No database, filesystem game persistence or browser storage exists.
 
-## Application structure
+## Implemented API
 
-Use a small repository boundary so storage can change without rewriting the UI.
+| Method and path         | Success response  |
+| ----------------------- | ----------------- |
+| `GET /api/games`        | 200, all games    |
+| `POST /api/games`       | 201, created game |
+| `GET /api/games/:id`    | 200, one game     |
+| `PATCH /api/games/:id`  | 200, updated game |
+| `DELETE /api/games/:id` | 204, no body      |
 
-```text
-UI components
-    |
-Route handlers / server logic
-    |
-GameRepository
-    |
-    +-- InMemoryGameRepository   // Stage 1
-    |
-    +-- SqliteGameRepository     // Stage 2
-```
+Routes are dynamic; GET responses use `Cache-Control: no-store`. Errors return an `error` string with 400 for invalid JSON/input, 404 for missing records, 409 for duplicate titles, or 500 for unexpected failures. Unknown input fields and empty PATCH bodies are rejected. PATCH accepts partial fields and `null` to clear optional values.
 
-Suggested repository operations:
+## Implemented client behavior
 
-```ts
-listGames()
-getGame(id)
-createGame(input)
-updateGame(id, input)
-deleteGame(id)
-```
+The server is authoritative, while React holds a fetched copy of games plus view/filter/dialog/form/drag state and loading/error state. Create/edit replace local records with server responses; delete removes a record after success. Kanban temporarily applies the new status and restores the previous record on failure. A client action lock prevents overlapping mutations in that browser.
 
-The initial implementation should only implement the in-memory repository, while keeping the interface compatible with the later SQLite repository.
+There is no polling or cross-tab synchronization. Search and sorting do not issue server queries. External cover URLs are fetched directly by the browser, with a local fallback; no image proxy or external game API is used.
 
-## Suggested server endpoints
+## Planned architecture
 
-```text
-GET    /api/games
-POST   /api/games
-GET    /api/games/:id
-PATCH  /api/games/:id
-DELETE /api/games/:id
-```
+- Implement `SqliteGameRepository` behind the existing interface, storing the database on EBS-backed EC2 storage and verifying persistence across restarts.
+- Add S3 upload handling and store uploaded-cover references in SQLite. Manual URLs remain remote.
+- Optionally add isolated server-side RAWG search/autofill; API keys stay on the server and failures must not block manual CRUD.
+- Select three justified Weeks 1–4 assignment extensions after reviewing course material. None is selected or implemented yet.
 
-A later S3 upload endpoint can be added when storage work begins.
-
-## Client state
-
-Server data is the source of truth.
-
-Local client state is limited to:
-
-- Current view mode
-- Search query
-- Active filters
-- Sort option
-- Open dialog
-- Form draft
-- Drag state
-
-Kanban drag-and-drop updates status through the normal game update path.
-
-## Cover model
-
-Store the cover source type together with the URL where applicable.
-
-```text
-upload       -> S3 object URL
-url          -> external URL
-api          -> external API image URL
-placeholder  -> local bundled asset
-```
-
-## Optional RAWG integration
-
-If added, RAWG requests should be made server-side rather than exposing an API key in browser code.
-
-RAWG must remain optional and isolated from core CRUD. Failure of the external API must not prevent manual game creation or editing.
-
-## AWS scope
-
-Initial deployment:
-
-- One small EC2 instance
-- Public HTTP access
-- No domain
-- No HTTPS requirement
-- No authentication
-
-Final storage:
-
-- EBS-backed SQLite
-- S3 bucket for uploaded covers
-
-## Assignment extensions
-
-The architecture must leave room for three justified "Going Beyond" topics from Weeks 1-4.
-
-Do not lock these in yet. Select them after the relevant course material is available, then document why each one solves a real problem in this service.
+No SQLite, S3 or RAWG dependencies, endpoints or integrations are currently implemented. EBS-backed game-data persistence is also not implemented; ordinary EC2 disk use does not provide persistence for the in-memory repository.

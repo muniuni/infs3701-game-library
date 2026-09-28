@@ -1,108 +1,46 @@
-# IMPLEMENTATION_PLAN.md
+# Implementation status and remaining plan
 
-## Phase 1: scaffold
+The initial in-memory application is implemented and EC2 deployment is complete. Persistent storage and external metadata remain future work.
 
-1. Create the Next.js app with TypeScript.
-2. Configure Tailwind CSS and shadcn/ui.
-3. Add Jersey 10 and Manrope.
-4. Add the dark-theme design tokens from `DESIGN.md`.
-5. Create the `Game` types and validation rules.
+## Completed phases
 
-## Phase 2: in-memory backend
+| Phase                    | Status                 | Delivered                                                                                                                  |
+| ------------------------ | ---------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| 1. Scaffold              | Done                   | Next.js/TypeScript, Tailwind, local shadcn/ui components, bundled fonts, dark tokens and Zod schemas                       |
+| 2. In-memory backend     | Done                   | Repository interface, shared in-memory store, development seeds, validated CRUD routes and duplicate-title checks          |
+| 3. Core UI               | Done                   | Grid/List/Kanban, title search, combined filters, sorting and empty states                                                 |
+| 4. Game dialogs          | Done for initial scope | Add/detail/edit, delete confirmation, placeholder/URL covers and disabled upload option                                    |
+| 5. Kanban behavior       | Done                   | Drag-and-drop, keyboard/touch status selector, PATCH updates and rollback on failure                                       |
+| 6. Responsive and polish | Done for initial scope | Responsive views/dialogs, focus handling, loading/error/confirmation states and browser checks                             |
+| 7. EC2 deployment        | Done                   | Initial application deployed to Amazon Linux 2023, as confirmed by the project owner; production build reported successful |
 
-1. Define a `GameRepository` interface.
-2. Implement `InMemoryGameRepository`.
-3. Add seed games for development.
-4. Add CRUD route handlers.
-5. Validate:
-   - required title
-   - rating integer 1-10
-   - non-negative playtime
-   - valid status
-   - arrays for platforms and tags
+Phase 7 completion is owner-reported. The EC2 checkout is `/home/ec2-user/infs3701-game-library`. Host service/proxy configurations and deployment screenshots are not versioned here; retain assignment evidence separately. No live EC2 audit was performed for this documentation update.
 
-Do not add SQLite, EBS, or S3 yet.
+Production starts empty and loses all game records on server restart. Development starts with six fictional fixtures. This is expected until Phase 8.
 
-## Phase 3: core UI
+## Existing verification
 
-1. Build the Home shell and toolbar.
-2. Build Grid view.
-3. Build List view.
-4. Build Kanban view.
-5. Add title search.
-6. Add status/platform/tag/rating filters.
-7. Add sorting.
-8. Add empty states.
+- `npm test`: repository CRUD, validation, duplicate identity, clone isolation, optional-field clearing, combined filters and sorting.
+- `npm run test:e2e`: Chromium API/UI flows, view switching, drag-and-drop, failed-save rollback, delete confirmation and mobile overflow. Build first and use a disposable local server.
+- `npm run lint`, `npm run typecheck`, `npm run build`: static checks and production compilation.
 
-## Phase 4: game dialogs
+These checks passed during initial implementation. This documentation update reviews source and test coverage; it does not represent a new test run or live deployment verification.
 
-1. Build `Add Game` dialog.
-2. Build game detail dialog.
-3. Add edit mode inside the detail dialog.
-4. Add delete confirmation.
-5. Add cover-source controls:
-   - placeholder
-   - external URL
-   - upload UI placeholder for later S3 work
-   - API image when metadata autofill exists
+## Phase 8. Persistent storage: planned, not implemented
 
-For the in-memory version, uploaded images do not need final persistent storage behavior yet.
+1. Add SQLite and implement `SqliteGameRepository` behind the existing interface.
+2. Store the database on EBS-backed EC2 storage and switch server CRUD to it.
+3. Add S3 upload handling, enable the upload form control and store cover references in SQLite.
+4. Verify game and uploaded-cover persistence across application and instance restarts.
 
-## Phase 5: Kanban behavior
+## Phase 9. Metadata autofill: optional, not implemented
 
-1. Add drag-and-drop.
-2. Update status on drop.
-3. Persist through the normal update endpoint.
-4. Handle failed updates by restoring the previous state.
+1. Add server-side RAWG search and a match preview in Add/Edit.
+2. Import selected metadata and cover URLs while keeping every value editable.
+3. Preserve manual entry when RAWG is unavailable.
 
-## Phase 6: responsive and polish
+The current `Cover` type reserves `api`, but validation does not yet accept it.
 
-1. Verify desktop layout.
-2. Make Grid responsive.
-3. Make List compact on mobile.
-4. Add horizontal Kanban scrolling.
-5. Make dialogs viewport-safe.
-6. Add loading, error, and confirmation states.
-7. Check keyboard and focus behavior.
+## Phase 10. Assignment extensions: planned, not selected
 
-## Phase 7: EC2 deployment
-
-1. Provision a small EC2 instance.
-2. Install the runtime and app dependencies.
-3. Deploy and build the Next.js app.
-4. Run the production server.
-5. Allow required HTTP traffic in the security group.
-6. Verify CRUD through the public EC2 address.
-7. Capture screenshots and implementation evidence for the assignment.
-
-At this stage, restarting the app may reset the library. That is expected.
-
-## Phase 8: persistent storage
-
-After the deployed in-memory version is stable:
-
-1. Add SQLite.
-2. Implement `SqliteGameRepository`.
-3. Store the SQLite database on EBS-backed storage.
-4. Migrate CRUD to the SQLite repository.
-5. Add S3 upload support for user-uploaded covers.
-6. Store S3 cover references in SQLite.
-7. Verify persistence across process and EC2 restarts.
-
-## Phase 9: optional metadata autofill
-
-1. Add server-side RAWG integration.
-2. Add game search in the Add/Edit dialog.
-3. Let users preview an API match.
-4. Autofill selected metadata.
-5. Keep every imported field editable.
-6. Preserve manual entry when RAWG is unavailable.
-
-## Phase 10: assignment-specific improvements
-
-After Weeks 3-4 material is available:
-
-1. Select three justified Going Beyond topics.
-2. Implement each only if it solves a real architectural concern.
-3. Record screenshots and configuration evidence.
-4. Update the assignment design document with the reason for each choice.
+Review Weeks 1–4 material, then select three justified Going Beyond topics. Implement only those that solve a concrete service concern and record their rationale, configuration and evidence.
