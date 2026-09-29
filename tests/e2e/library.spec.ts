@@ -372,3 +372,83 @@ test("sidebar filters, token entry and cover preview", async ({
     for (const id of created) await request.delete(`/api/games/${id}`);
   }
 });
+
+test("filter recovery, narrow layouts and visible form validation", async ({
+  page,
+  request,
+}) => {
+  const response = await request.post("/api/games", {
+    data: {
+      title: "Responsive fixture with a longer game title",
+      platforms: ["PC", "Handheld"],
+      tags: ["A longer custom label", "Puzzle"],
+      rating: 4,
+    },
+  });
+  const game = await response.json();
+  try {
+    await page.goto("/");
+    await page.getByLabel("Search titles").fill("Responsive fixture");
+    await page
+      .getByRole("button", { name: "Clear search", exact: true })
+      .click();
+    await expect(page.getByLabel("Search titles")).toBeFocused();
+    await expect(page.getByLabel("Search titles")).toHaveValue("");
+    await page
+      .getByRole("group", { name: "Filter by platform", exact: true })
+      .getByRole("button", { name: "PC", exact: true })
+      .click();
+    await page.getByRole("button", { name: "Remove platform filter" }).click();
+    await expect(
+      page.getByRole("group", { name: "Active filters" }),
+    ).toHaveCount(0);
+    await page.getByRole("button", { name: "Kanban", exact: true }).click();
+    await page.getByLabel("Search titles").fill("No matching title");
+    await expect(
+      page.getByRole("heading", { name: "No games found" }),
+    ).toBeVisible();
+    await page
+      .getByRole("button", { name: "Reset search and filters" })
+      .click();
+    await expect(page.locator(".kanban-card")).toHaveCount(1);
+    for (const width of [320, 768, 1024, 1440]) {
+      await page.setViewportSize({ width, height: 800 });
+      for (const view of ["Grid", "List", "Kanban"]) {
+        await page.getByRole("button", { name: view, exact: true }).click();
+        expect(
+          await page.evaluate(
+            () => document.documentElement.scrollWidth <= window.innerWidth,
+          ),
+        ).toBe(true);
+      }
+    }
+    await page.setViewportSize({ width: 390, height: 700 });
+    await page
+      .getByRole("button", { name: "Add Game", exact: true })
+      .first()
+      .click();
+    await page
+      .getByRole("textbox", { name: "Title", exact: true })
+      .fill("Validation fixture");
+    await page.getByRole("button", { name: "Edit cover", exact: true }).click();
+    await page.getByRole("button", { name: "Image URL", exact: true }).click();
+    await page.getByLabel("Cover URL").fill("ftp://example.com/cover.jpg");
+    await page.getByRole("button", { name: "Done", exact: true }).click();
+    await expect(
+      page.getByRole("button", { name: "Edit cover", exact: true }),
+    ).toBeFocused();
+    await page
+      .getByRole("button", { name: "Create game", exact: true })
+      .click();
+    await expect(page.locator(".game-form [role=alert]")).toBeFocused();
+    await expect(page.locator(".game-form [role=alert]")).toBeInViewport();
+    await expect(
+      page.getByRole("button", { name: "Cancel", exact: true }),
+    ).toBeInViewport();
+    await page.screenshot({ path: "test-results/mobile-validation.png" });
+    await page.getByRole("button", { name: "Cancel", exact: true }).click();
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+  } finally {
+    await request.delete(`/api/games/${game.id}`);
+  }
+});

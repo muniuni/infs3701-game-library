@@ -47,7 +47,7 @@ Orange marks primary actions, focus outlines and active drop borders. Delete act
 
 All dropdowns share a dark Radix Select menu with selected-item checkmarks, disabled options, keyboard navigation and typeahead. Visible keyboard focus, labelled controls, title-based image alt text, Radix modal focus containment and focus restoration are present. Escape/outside-click dismissal is blocked while a mutation is pending. Kanban selectors provide a keyboard/touch alternative to dragging. Errors use alerts; successful mutations use a screen-reader status region.
 
-Loading, empty-library, no-match, empty-column and saving/deleting states are implemented. Button background/border transitions last 150ms and are disabled for reduced motion. There are no custom dialog or view-transition animations.
+Loading, empty-library, no-match, empty-column and saving/deleting states are implemented. Every view provides a no-match state with a reset action. Active filters appear as removable chips above results, and search has a clear button that restores input focus. Local form validation errors receive focus and scroll into view. On narrow screens form pairs stack and footer actions share the available width. Button background/border transitions last 150ms and are disabled for reduced motion. There are no custom dialog or view-transition animations.
 
 ## Planned UI work
 

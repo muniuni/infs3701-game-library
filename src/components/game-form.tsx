@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   statuses,
   type Game,
@@ -32,6 +32,14 @@ export function GameForm({
   const [hoverRating, setHoverRating] = useState<number | null>(null);
   const [editingCover, setEditingCover] = useState(false);
   const [error, setError] = useState("");
+  const errorSummary = useRef<HTMLParagraphElement>(null);
+  const coverButton = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (error) {
+      errorSummary.current?.focus();
+      errorSummary.current?.scrollIntoView({ block: "nearest" });
+    }
+  }, [error]);
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const data = new FormData(event.currentTarget);
@@ -83,6 +91,7 @@ export function GameForm({
               <button
                 type="button"
                 className="cover-edit-action"
+                ref={coverButton}
                 aria-expanded={editingCover}
                 aria-controls="cover-controls"
                 onClick={() => setEditingCover(!editingCover)}
@@ -134,7 +143,10 @@ export function GameForm({
                 <button
                   type="button"
                   className="cover-done"
-                  onClick={() => setEditingCover(false)}
+                  onClick={() => {
+                    setEditingCover(false);
+                    coverButton.current?.focus();
+                  }}
                 >
                   Done
                 </button>
@@ -183,7 +195,7 @@ export function GameForm({
               />
             </label>
           </div>
-          <div className="form-pair">
+          <div className="playtime-field">
             <div>
               <span className="field-label">Playtime</span>
               <div className="playtime-inputs">
@@ -286,7 +298,12 @@ export function GameForm({
             />
           </label>
           {error && (
-            <p role="alert" className="error-message">
+            <p
+              ref={errorSummary}
+              tabIndex={-1}
+              role="alert"
+              className="error-message"
+            >
               {error}
             </p>
           )}

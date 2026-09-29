@@ -157,7 +157,7 @@ h1 {
 .search-field {
   position: relative;
 }
-.search-field svg {
+.search-field > svg {
   position: absolute;
   left: 12px;
   top: 13px;
@@ -165,6 +165,7 @@ h1 {
 }
 .search-field input {
   padding-left: 39px;
+  padding-right: 38px;
   width: 250px;
   height: 44px;
 }
@@ -1512,5 +1513,162 @@ dd {
   .star-choice svg {
     width: 20px;
     height: 20px;
+  }
+}
+
+/* Shared interaction and layout polish */
+.search-clear {
+  position: absolute;
+  right: 5px;
+  top: 5px;
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border-radius: 4px;
+  color: var(--text-muted);
+}
+.search-clear:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+.active-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-bottom: 18px;
+}
+.active-filters button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 32px;
+  padding: 6px 9px;
+  background: var(--surface-raised);
+  border-radius: 5px;
+  font-size: 11px;
+  max-width: 100%;
+  text-align: left;
+}
+.active-filters button span {
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+.active-filters button svg {
+  flex-shrink: 0;
+  color: var(--text-muted);
+}
+.active-filter-label {
+  color: var(--text-muted);
+}
+.active-filters button:hover {
+  background: var(--surface-hover);
+}
+.filter-options button {
+  min-height: 32px;
+}
+.filter-options button[aria-pressed="true"] {
+  box-shadow: inset 3px 0 var(--accent);
+}
+.view-switch button {
+  min-height: 34px;
+}
+.view-switch button:hover {
+  color: var(--text);
+  background: var(--surface-raised);
+}
+.select-option {
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+}
+.game-card {
+  display: flex;
+  flex-direction: column;
+}
+.card-cover {
+  width: 100%;
+  flex-shrink: 0;
+}
+.card-info {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  width: 100%;
+}
+.card-meta {
+  margin-top: auto;
+  padding-top: 10px;
+}
+.card-info h2 {
+  line-height: 1.5;
+}
+.game-card:focus-visible {
+  outline-offset: 3px;
+}
+.kanban:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 4px;
+  border-radius: 12px;
+}
+.kanban {
+  scroll-padding-inline: 12px;
+}
+.kanban-card {
+  scroll-margin-top: 172px;
+}
+.cover-done:hover,
+.input-token button:hover {
+  color: var(--text);
+  background: var(--surface-hover);
+}
+.playtime-field {
+  max-width: 340px;
+  width: 100%;
+}
+.form-fields {
+  overscroll-behavior: contain;
+}
+.form-fields .error-message {
+  margin-bottom: 0;
+}
+.detail-dialog .error-message {
+  flex-shrink: 0;
+}
+.rating-stars {
+  max-width: 100%;
+}
+.rating-stars svg {
+  flex-shrink: 1;
+  min-width: 12px;
+}
+@media (max-width: 560px) {
+  .form-pair {
+    grid-template-columns: 1fr;
+    gap: 18px;
+  }
+  .form-dialog .dialog-description {
+    margin-bottom: 18px;
+  }
+  .form-actions .button {
+    flex: 1;
+    min-height: 44px;
+  }
+  .results-bar {
+    flex-wrap: wrap;
+    gap: 8px 12px;
+    padding: 12px 0;
+  }
+  .reset-note {
+    max-width: none;
+    width: 100%;
+    margin-left: 0;
+    text-align: left;
+  }
+  .active-filters {
+    gap: 6px;
+  }
+  .game-list .list-title h2 {
+    font-size: 13px;
   }
 }

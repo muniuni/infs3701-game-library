@@ -5,6 +5,7 @@ import {
   Clock3,
   Pencil,
   Trash2,
+  X,
   Gamepad2,
   LayoutGrid,
   List,
@@ -58,6 +59,7 @@ export function Library() {
   const [dragged, setDragged] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<string | null>(null);
   const actionLock = useRef(false);
+  const searchInput = useRef<HTMLInputElement>(null);
   const addButton = useRef<HTMLButtonElement>(null);
   const opener = useRef<HTMLElement | null>(null);
   async function load() {
@@ -207,11 +209,24 @@ export function Library() {
             <div className="search-field">
               <Search size={18} aria-hidden="true" />
               <input
+                ref={searchInput}
                 aria-label="Search titles"
                 placeholder="Search titles…"
                 value={filters.query}
                 onChange={(event) => filter("query", event.target.value)}
               />
+              {filters.query && (
+                <button
+                  className="search-clear"
+                  aria-label="Clear search"
+                  onClick={() => {
+                    filter("query", "");
+                    searchInput.current?.focus();
+                  }}
+                >
+                  <X size={15} aria-hidden="true" />
+                </button>
+              )}
             </div>
             <Button
               ref={addButton}
@@ -394,6 +409,41 @@ export function Library() {
               Changes last until the server restarts.
             </span>
           </div>
+          {(filters.status ||
+            filters.platform ||
+            filters.tag ||
+            filters.rating) && (
+            <div
+              className="active-filters"
+              role="group"
+              aria-label="Active filters"
+            >
+              {(["status", "platform", "tag", "rating"] as const)
+                .filter((key) => filters[key])
+                .map((key) => (
+                  <button
+                    key={key}
+                    aria-label={`Remove ${key} filter`}
+                    onClick={() => filter(key, "")}
+                  >
+                    <span className="active-filter-label">
+                      {key === "rating"
+                        ? "Rating"
+                        : key === "tag"
+                          ? "Tag"
+                          : key === "platform"
+                            ? "Platform"
+                            : "Status"}
+                    </span>
+                    <span>
+                      {filters[key]}
+                      {key === "rating" ? "+" : ""}
+                    </span>
+                    <X size={12} aria-hidden="true" />
+                  </button>
+                ))}
+            </div>
+          )}
           <p role="status" className="sr-only">
             {notice}
           </p>
@@ -413,7 +463,7 @@ export function Library() {
             <div className="empty-state" role="status">
               <h2>Loading your library…</h2>
             </div>
-          ) : !visible.length && view !== "kanban" ? (
+          ) : !visible.length ? (
             <div className="empty-state">
               <Gamepad2 size={48} />
               <h2>{activeFilter ? "No games found" : "No games yet"}</h2>
@@ -422,7 +472,19 @@ export function Library() {
                   ? "Try another title or clear your filters."
                   : "Add your first game to start your collection."}
               </p>
-              {!activeFilter && (
+              {activeFilter ? (
+                <Button
+                  variant="secondary"
+                  onClick={() =>
+                    setFilters((previous) => ({
+                      ...initialFilters,
+                      sort: previous.sort,
+                    }))
+                  }
+                >
+                  Reset search and filters
+                </Button>
+              ) : (
                 <Button onClick={() => open({ mode: "add" })}>Add Game</Button>
               )}
             </div>
@@ -512,7 +574,12 @@ export function Library() {
               ))}
             </div>
           ) : (
-            <div className="kanban" aria-label="Game status board">
+            <div
+              className="kanban"
+              role="region"
+              tabIndex={0}
+              aria-label="Game status board"
+            >
               {statuses.map((status) => (
                 <section
                   key={status}
