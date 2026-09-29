@@ -22,7 +22,7 @@ The canonical types and validation are in `src/lib/game.ts`.
 | `review`                       | Optional trimmed text, up to 10,000 characters                                                                                   |
 | `cover`                        | Defaults to `{ type: "placeholder" }`; also accepts `{ type: "url", url: string }` with an HTTP/HTTPS URL up to 2,048 characters |
 
-Matching normalized titles identify the same game regardless of platform. Comparison uses Unicode NFKC normalization, trimmed/collapsed whitespace and lowercase. Duplicate titles are rejected; additional platforms belong on the existing record. Tags combine genres and user-defined labels. Forms accept comma-separated platforms and tags.
+Matching normalized titles identify the same game regardless of platform. Comparison uses Unicode NFKC normalization, trimmed/collapsed whitespace and lowercase. Duplicate titles are rejected; additional platforms belong on the existing record. Tags combine genres and user-defined labels. Forms use removable platform/tag tokens, confirmed with comma, Enter, Tab or blur. Repeated labels are deduplicated case-insensitively.
 
 Optional release date, playtime, rating and review can be cleared. API updates use `null` to clear them.
 
@@ -39,13 +39,13 @@ Optional release date, playtime, rating and review can be cleared. API updates u
 All views use the same browser-side query over fetched records. Kanban sorts within each column.
 
 - Search is a case-insensitive substring match on titles only.
-- Status, platform, tag and exact rating filters combine with AND. Each filter selects one value. Platform/tag options come from the library and match stored labels exactly.
+- Status, platform, tag and minimum rating filters combine with AND. Status, platform and tag each select one value through direct sidebar controls; selecting an active value again clears it. Rating uses a slider at the top of the sidebar on the existing 1–10 scale, including games at or above the selected value and excluding unrated games. The Any position clears the rating filter and includes unrated games. Platform/tag options come from the library and match stored labels exactly.
 - Default sort is recently added. Title sorts alphabetically; release date and timestamps sort newest first; rating and playtime sort highest first. Unset values come last, with title as the tiebreaker.
 - View, search and filter settings are not persisted across page reloads.
 
 ## Covers and planned features
 
-Implemented covers are a bundled SVG placeholder and browser-loaded external URLs. Failed images fall back to the placeholder. Upload appears only as a disabled form option.
+Implemented covers are a bundled SVG placeholder and browser-loaded external URLs. Failed images fall back to the placeholder. Cover editing offers Placeholder and Image URL controls; uploads are not available.
 
 The TypeScript `Cover` type also includes `upload` and `api`, but current input validation rejects both. There is no upload endpoint or metadata search.
 

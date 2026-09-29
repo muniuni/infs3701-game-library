@@ -82,7 +82,7 @@ test("create, edit, search, all views, drag, rollback, confirmation and mobile l
     .dragTo(page.getByRole("region", { name: "Playing column" }), {
       sourcePosition: { x: 15, y: 15 },
     });
-  await expect(page.getByLabel("Move UI fixture to status")).toHaveValue(
+  await expect(page.getByLabel("Move UI fixture to status")).toContainText(
     "Playing",
   );
   await expect(page.getByLabel("Move UI fixture to status")).toBeEnabled();
@@ -95,11 +95,14 @@ test("create, edit, search, all views, drag, rollback, confirmation and mobile l
         })
       : route.continue(),
   );
-  await page.getByLabel("Move UI fixture to status").selectOption("Completed");
+  await page
+    .getByRole("combobox", { name: "Move UI fixture to status" })
+    .click();
+  await page.getByRole("option", { name: "Completed", exact: true }).click();
   await expect(page.locator(".error-message[role=alert]")).toContainText(
     "previous status has been restored",
   );
-  await expect(page.getByLabel("Move UI fixture to status")).toHaveValue(
+  await expect(page.getByLabel("Move UI fixture to status")).toContainText(
     "Playing",
   );
   await page.unroute("**/api/games/*");
@@ -125,4 +128,247 @@ test("create, edit, search, all views, drag, rollback, confirmation and mobile l
   await expect(
     page.getByRole("heading", { name: "No games found" }),
   ).toBeVisible();
+});
+
+test("sidebar filters, token entry and cover preview", async ({
+  page,
+  request,
+}) => {
+  const created: string[] = [];
+  try {
+    for (let i = 1; i <= 5; i++) {
+      const response = await request.post("/api/games", {
+        data: {
+          title: `Refinement fixture ${i}`,
+          platforms: ["PC"],
+          tags: ["Puzzle"],
+          rating: i === 1 ? 8 : 5,
+        },
+      });
+      created.push((await response.json()).id);
+    }
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await page.goto("/");
+    await page.getByLabel("Search titles").fill("Refinement fixture");
+    await expect(page.locator(".game-card")).toHaveCount(5);
+    expect(
+      await page
+        .locator(".game-grid")
+        .evaluate(
+          (el) => getComputedStyle(el).gridTemplateColumns.split(" ").length,
+        ),
+    ).toBe(4);
+    const sort = page.getByRole("combobox", { name: "Sort games" });
+    await sort.focus();
+    await sort.press("Enter");
+    await page
+      .getByRole("option", { name: "Recently added", exact: true })
+      .press("ArrowDown");
+    await expect(
+      page.getByRole("option", { name: "Recently updated", exact: true }),
+    ).toBeFocused();
+    await page.keyboard.press("Enter");
+    await expect(sort).toContainText("Recently updated");
+    const sidebar = page.getByRole("complementary", {
+      name: "Library filters",
+    });
+    await sidebar.getByRole("button", { name: "PC", exact: true }).click();
+    await sidebar.getByRole("button", { name: "Puzzle", exact: true }).click();
+    await expect(sidebar.locator(".filter-group").first()).toHaveAttribute(
+      "aria-label",
+      "Filter by rating",
+    );
+    await sidebar.getByRole("slider", { name: "Filter by rating" }).fill("5");
+    await expect(page.locator(".game-card")).toHaveCount(5);
+    await sidebar.getByRole("slider", { name: "Filter by rating" }).fill("8");
+    await expect(page.locator(".game-card")).toHaveCount(1);
+    await sidebar.getByRole("slider", { name: "Filter by rating" }).fill("0");
+    await expect(page.locator(".game-card")).toHaveCount(5);
+    const gridCover = await page.locator(".card-cover").first().boundingBox();
+    expect(gridCover!.width / gridCover!.height).toBeCloseTo(4 / 3, 2);
+    await page.screenshot({
+      path: "test-results/refined-grid.png",
+      fullPage: true,
+    });
+    await page.getByRole("button", { name: "List", exact: true }).click();
+    const listCover = await page.locator(".list-cover").first().boundingBox();
+    expect(listCover!.width / listCover!.height).toBeCloseTo(4 / 3, 2);
+    await page.screenshot({
+      path: "test-results/refined-list.png",
+      fullPage: true,
+    });
+    await page.getByRole("button", { name: "Kanban", exact: true }).click();
+    const boardCover = await page
+      .locator(".kanban-cover")
+      .first()
+      .boundingBox();
+    expect(boardCover!.width / boardCover!.height).toBeCloseTo(4 / 3, 2);
+    await page.screenshot({
+      path: "test-results/refined-kanban.png",
+      fullPage: true,
+    });
+    await page.evaluate(() => window.scrollTo(0, 400));
+    await expect
+      .poll(() => page.evaluate(() => window.scrollY))
+      .toBeGreaterThan(0);
+    await expect
+      .poll(() =>
+        page
+          .locator(".library-header")
+          .evaluate((el) => el.getBoundingClientRect().top),
+      )
+      .toBe(0);
+    await page
+      .getByRole("button", { name: "Add Game", exact: true })
+      .first()
+      .click();
+    await page
+      .getByLabel("Title", { exact: false })
+      .last()
+      .fill("Refinement token fixture");
+    const platforms = page.getByRole("textbox", {
+      name: "Platforms",
+      exact: true,
+    });
+    await platforms.fill("PC");
+    await platforms.press(",");
+    await platforms.fill("pc");
+    await platforms.press("Enter");
+    await expect(
+      page.getByRole("button", {
+        name: "Remove PC from platforms",
+        exact: true,
+      }),
+    ).toHaveCount(1);
+    await platforms.fill("Switch");
+    await platforms.press("Tab");
+    await expect(
+      page.getByRole("button", { name: "Remove Switch from platforms" }),
+    ).toBeVisible();
+    await page
+      .getByRole("button", { name: "Remove PC from platforms", exact: true })
+      .click();
+    await page.getByLabel("Tags", { exact: true }).fill("Puzzle, Favourite");
+    await page.getByRole("radio", { name: "8 out of 10", exact: true }).check();
+    await page.getByRole("combobox", { name: "Status", exact: true }).click();
+    await page.getByRole("option", { name: "Playing", exact: true }).click();
+    await page.getByRole("button", { name: "Edit cover" }).click();
+    const formCover = await page.locator(".form-cover-preview").boundingBox();
+    expect(formCover!.width / formCover!.height).toBeCloseTo(4 / 3, 2);
+    await page.getByRole("button", { name: "Image URL", exact: true }).click();
+    await expect(page.getByLabel("Cover URL")).toBeFocused();
+    await page.screenshot({ path: "test-results/cover-editor.png" });
+    await page.route("https://example.com/cover.jpg", (route) => route.abort());
+    await page.getByLabel("Cover URL").fill("https://example.com/cover.jpg");
+    await page.getByLabel("Cover URL").press("Tab");
+    await expect(page.locator(".form-cover-preview img")).toHaveAttribute(
+      "src",
+      "/cover-placeholder.svg",
+    );
+    await page.getByRole("button", { name: "Edit cover" }).click();
+    await page.screenshot({
+      path: "test-results/refined-form.png",
+      fullPage: true,
+    });
+    await page.getByRole("button", { name: "Create game" }).click();
+    await expect(
+      page.getByRole("dialog").getByText("Switch", { exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("img", { name: "8 out of 10", exact: true }),
+    ).toBeVisible();
+    await expect(page.locator(".rating-stars .star-filled")).toHaveCount(8);
+    await page.screenshot({ path: "test-results/star-rating-details.png" });
+    const detailCover = await page.locator(".detail-cover").boundingBox();
+    expect(detailCover!.width / detailCover!.height).toBeCloseTo(4 / 3, 2);
+    const saved = (await (await request.get("/api/games")).json()).find(
+      (game: { title: string }) => game.title === "Refinement token fixture",
+    );
+    created.push(saved.id);
+    expect(saved.rating).toBe(8);
+    expect(saved.status).toBe("Playing");
+    expect(saved.platforms).toEqual(["Switch"]);
+    expect(saved.tags).toEqual(["Puzzle", "Favourite"]);
+    expect(saved.cover.url).toBe("https://example.com/cover.jpg");
+    await page.getByRole("button", { name: "Edit", exact: true }).click();
+    await expect(
+      page.getByRole("radio", { name: "8 out of 10", exact: true }),
+    ).toBeChecked();
+    await page.getByRole("radio", { name: "8 out of 10", exact: true }).focus();
+    await page.keyboard.press("ArrowRight");
+    await expect(
+      page.getByRole("radio", { name: "9 out of 10", exact: true }),
+    ).toBeChecked();
+    await page
+      .getByRole("button", { name: "Clear rating", exact: true })
+      .click();
+    await page.setViewportSize({ width: 390, height: 700 });
+    await page.locator(".form-fields").evaluate((el) => {
+      el.scrollTop = 0;
+    });
+    await expect(
+      page.getByRole("button", { name: "Cancel", exact: true }),
+    ).toBeInViewport();
+    await expect(
+      page.getByRole("button", { name: "Save changes", exact: true }),
+    ).toBeInViewport();
+    await page.locator(".form-fields").evaluate((el) => {
+      el.scrollTop = el.scrollHeight;
+    });
+    await expect(
+      page.getByRole("button", { name: "Save changes", exact: true }),
+    ).toBeInViewport();
+    expect(
+      await page.locator(".form-fields").evaluate((el) => el.scrollTop),
+    ).toBeGreaterThan(0);
+    const fieldsBox = await page.locator(".form-fields").boundingBox();
+    const footerBox = await page.locator(".form-actions").boundingBox();
+    expect(fieldsBox!.y + fieldsBox!.height).toBeLessThanOrEqual(
+      footerBox!.y + 1,
+    );
+    await page.screenshot({ path: "test-results/mobile-edit-form.png" });
+    await page
+      .getByRole("button", { name: "Save changes", exact: true })
+      .click();
+    await expect(
+      page.getByRole("img", { name: "Not rated", exact: true }),
+    ).toBeVisible();
+    await expect(page.locator(".rating-stars .star-filled")).toHaveCount(0);
+    await page.getByRole("button", { name: "Close", exact: true }).click();
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await page.setViewportSize({ width: 390, height: 700 });
+    await page.getByRole("button", { name: "List", exact: true }).click();
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= window.innerWidth,
+      ),
+    ).toBe(true);
+    await page.locator(".filter-disclosure summary").click();
+    await expect(
+      sidebar.getByRole("button", { name: "All statuses" }),
+    ).toBeHidden();
+    await page.evaluate(() => window.scrollTo(0, 400));
+    await expect
+      .poll(() => page.evaluate(() => window.scrollY))
+      .toBeGreaterThan(0);
+    await expect
+      .poll(() =>
+        page
+          .locator(".library-header")
+          .evaluate((el) => el.getBoundingClientRect().top),
+      )
+      .toBe(0);
+    await expect(
+      page.getByRole("textbox", { name: "Search titles" }),
+    ).toBeInViewport();
+    await expect(
+      page.getByRole("button", { name: "Add Game", exact: true }).first(),
+    ).toBeInViewport();
+    await page.screenshot({
+      path: "test-results/refined-mobile.png",
+      fullPage: true,
+    });
+  } finally {
+    for (const id of created) await request.delete(`/api/games/${id}`);
+  }
 });

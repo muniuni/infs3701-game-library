@@ -89,6 +89,19 @@ test("combined filters, title-only search and optional-value sorting", async () 
   await repo.createGame(createGameSchema.parse({ title: "Gamma", rating: 10 }));
   const games = await repo.listGames();
   assert.deepEqual(
+    selectGames(games, { ...initialFilters, rating: "8", sort: "rating" }).map(
+      (game) => game.title,
+    ),
+    ["Gamma", "Beta"],
+  );
+  assert.deepEqual(
+    selectGames(games, { ...initialFilters, rating: "9" }).map(
+      (game) => game.title,
+    ),
+    ["Gamma"],
+  );
+
+  assert.deepEqual(
     selectGames(games, { ...initialFilters, sort: "rating" }).map(
       (g) => g.title,
     ),

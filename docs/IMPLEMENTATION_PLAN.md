@@ -21,7 +21,7 @@ Production starts empty and loses all game records on server restart. Developmen
 ## Existing verification
 
 - `npm test`: repository CRUD, validation, duplicate identity, clone isolation, optional-field clearing, combined filters and sorting.
-- `npm run test:e2e`: Chromium API/UI flows, view switching, drag-and-drop, failed-save rollback, delete confirmation and mobile overflow. Build first and use a disposable local server.
+- `npm run test:e2e`: Chromium API/UI flows, view switching, drag-and-drop, failed-save rollback, delete confirmation and mobile overflow. Build first; the suite starts a disposable local server on port 3101 (override with `PLAYWRIGHT_PORT`). The UI refinement coverage includes four-column Grid layout, combined sidebar filters, token entry/removal/deduplication, cover editing and mobile filter collapse.
 - `npm run lint`, `npm run typecheck`, `npm run build`: static checks and production compilation.
 
 These checks passed during initial implementation. This documentation update reviews source and test coverage; it does not represent a new test run or live deployment verification.

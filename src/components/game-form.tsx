@@ -7,6 +7,10 @@ import {
   createGameSchema,
 } from "@/lib/game";
 import { Button } from "./ui/button";
+import { Select } from "./ui/select";
+import { GameCover } from "./game-cover";
+import { TokenInput } from "./token-input";
+import { Pencil, Star, Image as ImageIcon, Link } from "lucide-react";
 export function GameForm({
   game,
   busy,
@@ -21,6 +25,12 @@ export function GameForm({
   const [coverType, setCoverType] = useState(
     game?.cover.type === "url" ? "url" : "placeholder",
   );
+  const [coverUrl, setCoverUrl] = useState(
+    game?.cover.type === "url" ? game.cover.url : "",
+  );
+  const [rating, setRating] = useState(game?.rating ?? 0);
+  const [hoverRating, setHoverRating] = useState<number | null>(null);
+  const [editingCover, setEditingCover] = useState(false);
   const [error, setError] = useState("");
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -41,11 +51,11 @@ export function GameForm({
       releaseDate: value("releaseDate") || null,
       playtimeMinutes:
         hours || minutes ? Number(hours) * 60 + Number(minutes) : null,
-      rating: value("rating") ? Number(value("rating")) : null,
+      rating: rating || null,
       review: value("review") || null,
       cover:
         coverType === "url"
-          ? { type: "url", url: value("coverUrl") }
+          ? { type: "url", url: coverUrl.trim() }
           : { type: "placeholder" },
     };
     const parsed = createGameSchema.safeParse(input);
@@ -58,160 +68,243 @@ export function GameForm({
   }
   return (
     <form onSubmit={submit} className="game-form">
-      <fieldset disabled={busy}>
-        <label>
-          Title <span aria-hidden="true">*</span>
-          <input
-            name="title"
-            defaultValue={game?.title}
-            required
-            maxLength={160}
-            placeholder="Name your next adventure"
-            autoFocus
-          />
-        </label>
-        <div className="form-pair">
-          <label>
-            Platforms
-            <input
-              name="platforms"
-              aria-label="Platforms"
-              aria-describedby="platforms-hint"
-              defaultValue={game?.platforms.join(", ")}
-              placeholder="PC, Switch"
-            />
-            <small id="platforms-hint">Separate platforms with commas.</small>
-          </label>
-          <label>
-            Tags
-            <input
-              name="tags"
-              aria-label="Tags"
-              aria-describedby="tags-hint"
-              defaultValue={game?.tags.join(", ")}
-              placeholder="RPG, favourites"
-            />
-            <small id="tags-hint">
-              Genres and your own tags, separated by commas.
-            </small>
-          </label>
-        </div>
-        <div className="form-pair">
-          <label>
-            Status
-            <select name="status" defaultValue={game?.status ?? "Unplayed"}>
-              {statuses.map((status) => (
-                <option key={status}>{status}</option>
-              ))}
-            </select>
-          </label>
-          <label>
-            Release date
-            <input
-              name="releaseDate"
-              type="date"
-              defaultValue={game?.releaseDate}
-            />
-          </label>
-        </div>
-        <div className="form-pair">
-          <div>
-            <span className="field-label">Playtime</span>
-            <div className="playtime-inputs">
-              <label>
-                <input
-                  aria-label="Playtime hours"
-                  name="hours"
-                  type="number"
-                  min="0"
-                  step="1"
-                  defaultValue={
-                    game?.playtimeMinutes === undefined
-                      ? ""
-                      : Math.floor(game.playtimeMinutes / 60)
-                  }
-                  placeholder="0"
-                />
-                <small>Hours</small>
-              </label>
-              <label>
-                <input
-                  aria-label="Playtime minutes"
-                  name="minutes"
-                  type="number"
-                  min="0"
-                  max="59"
-                  step="1"
-                  defaultValue={
-                    game?.playtimeMinutes === undefined
-                      ? ""
-                      : game.playtimeMinutes % 60
-                  }
-                  placeholder="0"
-                />
-                <small>Minutes</small>
-              </label>
+      <div className="form-fields">
+        <fieldset disabled={busy}>
+          <div className="cover-editor">
+            <div className="form-cover-preview">
+              <GameCover
+                cover={
+                  coverType === "url" && /^https?:\/\//i.test(coverUrl)
+                    ? { type: "url", url: coverUrl }
+                    : { type: "placeholder" }
+                }
+                title={game?.title || "Game"}
+              />
+              <button
+                type="button"
+                className="cover-edit-action"
+                aria-expanded={editingCover}
+                aria-controls="cover-controls"
+                onClick={() => setEditingCover(!editingCover)}
+              >
+                <Pencil size={14} /> Edit cover
+              </button>
             </div>
+            {editingCover && (
+              <div id="cover-controls" className="cover-controls">
+                <div
+                  className="cover-source-options"
+                  role="group"
+                  aria-label="Cover source"
+                >
+                  <button
+                    type="button"
+                    aria-pressed={coverType === "placeholder"}
+                    onClick={() => setCoverType("placeholder")}
+                  >
+                    <ImageIcon size={15} />
+                    Placeholder
+                  </button>
+                  <button
+                    type="button"
+                    aria-pressed={coverType === "url"}
+                    onClick={() => setCoverType("url")}
+                  >
+                    <Link size={15} />
+                    Image URL
+                  </button>
+                </div>
+                {coverType === "url" && (
+                  <label>
+                    Cover URL
+                    <input
+                      type="url"
+                      autoFocus
+                      value={coverUrl}
+                      onChange={(event) => setCoverUrl(event.target.value)}
+                      placeholder="https://example.com/cover.jpg"
+                    />
+                  </label>
+                )}
+                <p className="cover-hint">
+                  {coverType === "url"
+                    ? "Use a direct HTTPS or HTTP image link."
+                    : "Use the default cover. You can add an image URL anytime."}
+                </p>
+                <button
+                  type="button"
+                  className="cover-done"
+                  onClick={() => setEditingCover(false)}
+                >
+                  Done
+                </button>
+              </div>
+            )}
           </div>
           <label>
-            Rating
-            <select name="rating" defaultValue={game?.rating ?? ""}>
-              <option value="">Not rated</option>
-              {Array.from({ length: 10 }, (_, i) => (
-                <option key={i + 1} value={i + 1}>
-                  {i + 1} / 10
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
-        <label>
-          Review
-          <textarea
-            name="review"
-            defaultValue={game?.review}
-            rows={3}
-            maxLength={10000}
-            placeholder="What stayed with you?"
-          />
-        </label>
-        <label>
-          Cover source
-          <select
-            value={coverType}
-            onChange={(event) => setCoverType(event.target.value)}
-          >
-            <option value="placeholder">Local placeholder</option>
-            <option value="url">External URL</option>
-            <option disabled>Upload (available in a later version)</option>
-          </select>
-        </label>
-        {coverType === "url" && (
-          <label>
-            Cover URL
+            Title <span aria-hidden="true">*</span>
             <input
-              type="url"
-              name="coverUrl"
+              name="title"
+              defaultValue={game?.title}
               required
-              defaultValue={game?.cover.type === "url" ? game.cover.url : ""}
-              placeholder="https://example.com/cover.jpg"
+              maxLength={160}
+              placeholder="Game title"
+              autoFocus
             />
           </label>
-        )}
-        {error && (
-          <p role="alert" className="error-message">
-            {error}
-          </p>
-        )}
-        <div className="dialog-actions">
-          <Button type="button" variant="secondary" onClick={onCancel}>
-            Cancel
-          </Button>
-          <Button type="submit">
-            {busy ? "Saving…" : game ? "Save changes" : "Create game"}
-          </Button>
-        </div>
-      </fieldset>
+          <div className="form-pair">
+            <TokenInput
+              name="platforms"
+              label="Platforms"
+              initial={game?.platforms}
+            />
+            <TokenInput name="tags" label="Tags" initial={game?.tags} />
+          </div>
+          <div className="form-pair">
+            <label>
+              Status
+              <Select
+                name="status"
+                label="Status"
+                defaultValue={game?.status ?? "Unplayed"}
+                disabled={busy}
+                options={statuses.map((status) => ({
+                  value: status,
+                  label: status,
+                }))}
+              />
+            </label>
+            <label>
+              Release date
+              <input
+                name="releaseDate"
+                type="date"
+                defaultValue={game?.releaseDate}
+              />
+            </label>
+          </div>
+          <div className="form-pair">
+            <div>
+              <span className="field-label">Playtime</span>
+              <div className="playtime-inputs">
+                <label>
+                  <input
+                    aria-label="Playtime hours"
+                    name="hours"
+                    type="number"
+                    min="0"
+                    step="1"
+                    defaultValue={
+                      game?.playtimeMinutes === undefined
+                        ? ""
+                        : Math.floor(game.playtimeMinutes / 60)
+                    }
+                    placeholder="0"
+                  />
+                  <small>Hours</small>
+                </label>
+                <label>
+                  <input
+                    aria-label="Playtime minutes"
+                    name="minutes"
+                    type="number"
+                    min="0"
+                    max="59"
+                    step="1"
+                    defaultValue={
+                      game?.playtimeMinutes === undefined
+                        ? ""
+                        : game.playtimeMinutes % 60
+                    }
+                    placeholder="0"
+                  />
+                  <small>Minutes</small>
+                </label>
+              </div>
+            </div>
+          </div>
+          <div className="form-rating">
+            <div className="rating-field-heading">
+              <span className="field-label" id="form-rating-label">
+                Rating
+              </span>
+              <span className="muted">
+                {rating ? `${rating} / 10` : "Not rated"}
+              </span>
+            </div>
+            <div
+              className="star-input"
+              role="radiogroup"
+              aria-labelledby="form-rating-label"
+              onMouseLeave={() => setHoverRating(null)}
+            >
+              {Array.from({ length: 10 }, (_, i) => i + 1).map((value) => (
+                <label
+                  key={value}
+                  className={
+                    (hoverRating ?? rating) >= value
+                      ? "star-choice is-filled"
+                      : "star-choice"
+                  }
+                  onMouseEnter={() => setHoverRating(value)}
+                >
+                  <input
+                    type="radio"
+                    name="rating"
+                    value={value}
+                    checked={rating === value}
+                    onChange={() => setRating(value)}
+                    aria-label={`${value} out of 10`}
+                  />
+                  <Star
+                    size={22}
+                    aria-hidden="true"
+                    fill={
+                      (hoverRating ?? rating) >= value ? "currentColor" : "none"
+                    }
+                  />
+                </label>
+              ))}
+            </div>
+            <button
+              type="button"
+              className="clear-rating"
+              disabled={!rating}
+              onClick={() => setRating(0)}
+            >
+              Clear rating
+            </button>
+          </div>
+          <label>
+            Review
+            <textarea
+              name="review"
+              defaultValue={game?.review}
+              rows={3}
+              maxLength={10000}
+              placeholder="Your notes about the game"
+            />
+          </label>
+          {error && (
+            <p role="alert" className="error-message">
+              {error}
+            </p>
+          )}
+        </fieldset>
+      </div>
+      <div className="dialog-actions form-actions">
+        <Button
+          type="button"
+          variant="secondary"
+          disabled={busy}
+          onClick={onCancel}
+        >
+          Cancel
+        </Button>
+        <Button type="submit" disabled={busy}>
+          {busy ? "Saving…" : game ? "Save changes" : "Create game"}
+        </Button>
+      </div>
     </form>
   );
 }

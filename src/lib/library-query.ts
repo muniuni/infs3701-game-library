@@ -23,7 +23,8 @@ export function selectGames(games: Game[], filters: Filters): Game[] {
         (!filters.status || game.status === filters.status) &&
         (!filters.platform || game.platforms.includes(filters.platform)) &&
         (!filters.tag || game.tags.includes(filters.tag)) &&
-        (!filters.rating || game.rating === Number(filters.rating)),
+        (!filters.rating ||
+          (game.rating !== undefined && game.rating >= Number(filters.rating))),
     )
     .sort((a, b) => {
       if (filters.sort === "title") return a.title.localeCompare(b.title);
