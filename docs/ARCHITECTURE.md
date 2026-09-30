@@ -7,10 +7,22 @@ Next.js 16 App Router, React 19, TypeScript, Tailwind CSS 4, locally styled shad
 **Phase 7 EC2 deployment is complete**, as confirmed by the project owner. The deployment environment is Amazon Linux 2023; the repository path on EC2 is `/home/ec2-user/infs3701-game-library`. The production build was reported successful.
 
 ```text
-Browser → HTTP → EC2 → Next.js → InMemoryGameRepository
+Browser
+  ↓ HTTP
+Nginx :80
+  ↓
+Next.js :3000
+  ↓
+InMemoryGameRepository
+
+PM2 manages the Next.js process.
 ```
 
-The deployment instructions use Nginx on port 80 and systemd to run one Next.js process on `127.0.0.1:3000` with Node.js 24. These host configurations and public-address evidence are not checked into this repository; completion is owner-reported, not a live infrastructure audit.
+The deployment uses Nginx on port 80 as a reverse proxy and PM2 to run
+and monitor one Next.js process on `127.0.0.1:3000` with Node.js 24.
+
+PM2 is configured through `ecosystem.config.cjs`. Its startup integration
+restores the application after an EC2 reboot.
 
 The repository's `npm start` command itself runs `next start --hostname 0.0.0.0` (default port 3000). `npm run build` uses webpack. The declared Node.js minimum is 20.9.0.
 
