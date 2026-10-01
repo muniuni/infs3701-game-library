@@ -2,7 +2,7 @@
 
 ## Implemented visual system
 
-Dark-only, cover-focused library influenced by the Obscura reference's typography and restrained pixel character. The current shell has a sticky header containing the wordmark, Library heading, title search and Add Game action. It stays above scrolling content and below modal dialogs, with compact spacing on mobile. The shell also has an in-memory indicator, view/sort toolbar, left filter sidebar and results count with a server-restart notice.
+Dark-only, cover-focused library influenced by the Obscura reference's typography and restrained pixel character. The current shell has a sticky header containing the wordmark, Library heading, title search and Add Game action. It stays above scrolling content and below modal dialogs, with compact spacing on mobile. The shell also has a view/sort toolbar, left filter sidebar and results count. The former in-memory and restart-loss notices have been removed for SQLite persistence.
 
 Styles live in `src/app/globals.css`; local font imports are in `src/app/layout.tsx`.
 
@@ -32,7 +32,7 @@ Orange marks primary actions, focus outlines and active drop borders. Delete act
 - **List:** a shared surface with borderless rows, aligned column headings, larger 4:3 thumbnails, subdued tag/status chips and starred ratings. On mobile, status and rating stack beside the title and platform; column headings are hidden. Playtime and release date appear when screen width allows.
 - **Kanban:** five columns, each at least 240px wide, with filtered counts. Cards contain a full-width 4:3 cover, title, platforms, playtime with a clock icon, optional rating and a status selector. Tonal surfaces separate cards and columns without extra divider lines. Dragged cards fade; the active column gains an orange border.
 - **Details:** title above a 4:3 cover and grouped metadata panel with ten filled/empty rating stars and a numeric value, a full-width review section, followed by Delete, Close and Edit actions. The layout stacks at 560px or below.
-- **Add/Edit:** 4:3 cover preview with an overlaid Edit cover action above the title, platform/tag token inputs, status, release date, hours/minutes, rating and review. Tokens commit with comma, Enter, Tab or blur and can be removed individually. Edit cover reveals direct Placeholder/Image URL controls and focuses the URL input when selected. Uploads remain unavailable. Rating uses ten clickable stars, keyboard-operable radio controls and Clear rating. The form fields scroll independently while Cancel and Create/Save stay visible in a fixed footer.
+- **Add/Edit:** 4:3 cover preview with an overlaid Edit cover action above the title, platform/tag token inputs, status, release date, hours/minutes, rating and review. Tokens commit with comma, Enter, Tab or blur and can be removed individually. Edit cover reveals direct Placeholder/Image URL/Upload controls and focuses the URL input when selected. Upload accepts JPEG, PNG and WebP up to 5 MiB and 40 megapixels, with a local preview. Files are sent on save; pending text indicates uploading/saving, and a failed save leaves the image available for retry. Editing an existing upload preserves it unless a different cover is selected. Rating uses ten clickable stars, keyboard-operable radio controls and Clear rating. The form fields scroll independently while Cancel and Create/Save stay visible in a fixed footer.
 - **Delete:** confirmation replaces the dialog contents and offers Keep game or Delete game.
 
 ## Implemented responsive behavior
@@ -49,6 +49,8 @@ All dropdowns share a dark Radix Select menu with selected-item checkmarks, disa
 
 Loading, empty-library, no-match, empty-column and saving/deleting states are implemented. Every view provides a no-match state with a reset action. Active filters appear as removable chips above results, and search has a clear button that restores input focus. Local form validation errors receive focus and scroll into view. On narrow screens form pairs stack and footer actions share the available width. Button background/border transitions last 150ms and are disabled for reduced motion. There are no custom dialog or view-transition animations.
 
-## Planned UI work
+## Remaining work
 
-Enable uploads when S3 support exists. If RAWG is added, introduce metadata search/preview with editable imported fields. Neither flow is implemented. Preserve the current dark theme, neutral statuses and manual-entry workflow when extending the UI.
+Phase 8's persistence and upload UI is implemented. Local tests cover database reopening, upload preview, failed-save retry, unchanged-cover editing and replacement. EC2 storage, S3 delivery/privacy and cleanup await owner validation in [the deployment guide](../deploy/README.md).
+
+If Phase 9 RAWG support is added, introduce metadata search/preview with editable imported fields. Preserve the current dark theme, neutral statuses and manual-entry workflow.

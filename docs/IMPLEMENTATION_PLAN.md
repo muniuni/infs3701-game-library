@@ -1,6 +1,6 @@
 # Implementation status and remaining plan
 
-The initial in-memory application is implemented and EC2 deployment is complete. Persistent storage and external metadata remain future work.
+Phases 1–7 are complete. Phase 8 application code and deployment configuration are implemented; EC2/AWS deployment and owner validation remain pending. External metadata remains future work.
 
 ## Completed phases
 
@@ -16,22 +16,36 @@ The initial in-memory application is implemented and EC2 deployment is complete.
 
 Phase 7 completion is owner-reported. The EC2 checkout is `/home/ec2-user/infs3701-game-library`. Host service/proxy configurations and deployment screenshots are not versioned here; retain assignment evidence separately. No live EC2 audit was performed for this documentation update.
 
-Production starts empty and loses all game records on server restart. Development starts with six fictional fixtures. This is expected until Phase 8.
+The active repository now uses Prisma/SQLite. New databases start empty and retain records across application restarts. The original in-memory repository remains available for unit tests.
 
-## Existing verification
+## Phase 8. Implemented locally, awaiting owner validation
 
-- `npm test`: repository CRUD, validation, duplicate identity, clone isolation, optional-field clearing, combined filters and sorting.
-- `npm run test:e2e`: Chromium API/UI flows, view switching, drag-and-drop, failed-save rollback, delete confirmation and mobile overflow. Build first; the suite starts a disposable local server on port 3101 (override with `PLAYWRIGHT_PORT`). The UI refinement coverage includes four-column Grid layout, combined sidebar filters, token entry/removal/deduplication, cover editing and mobile filter collapse.
-- `npm run lint`, `npm run typecheck`, `npm run build`: static checks and production compilation.
+### Phase 8 decisions
 
-These checks passed during initial implementation. This documentation update reviews source and test coverage; it does not represent a new test run or live deployment verification.
+- Private S3 uploads and delivery go through Next.js, using IAM and bucket `infs3701-game-library-images` in `us-east-1`.
+- Accept JPEG, PNG and WebP up to 5 MiB. Decode/validate still images up to 40 megapixels. Delete replaced/deleted uploads after committing the game mutation.
+- Require the separate EBS filesystem at `/mnt/game-library-data`; store SQLite at `/mnt/game-library-data/game-library.sqlite`.
+- Back up SQLite with EBS snapshots. Existing in-memory records do not need migration. Snapshotting EBS does not back up S3 image contents.
 
-## Phase 8. Persistent storage: planned, not implemented
+### Delivered
 
-1. Add SQLite and implement `SqliteGameRepository` behind the existing interface.
-2. Store the database on EBS-backed EC2 storage and switch server CRUD to it.
-3. Add S3 upload handling, enable the upload form control and store cover references in SQLite.
-4. Verify game and uploaded-cover persistence across application and instance restarts.
+1. Prisma schema and versioned migration, `SqliteGameRepository`, database-enforced normalized-title uniqueness, preserved CRUD/validation semantics and safe-integer playtime.
+2. Lazy server repository, local database setup, explicit production EBS path/UUID checks, PM2 configuration and mount dependency template.
+3. Multipart save and image delivery endpoints, bounded requests, content validation, S3 IAM access and durable cleanup ledger. A timer retries failed deletes and expired pending uploads without browser traffic.
+4. Upload control, preview, pending/error/retry behavior, preserved uploaded covers on unrelated edits, and removal of obsolete in-memory notices.
+5. IAM policies, cleanup service/timer and [owner deployment/validation guide](../deploy/README.md).
+
+### Local verification
+
+- `npm test`: existing query/validation tests plus real SQLite CRUD, reopening and a fresh Node.js process, normalized uniqueness, optional clearing, image replacement/deletion, ambiguous PUT recovery, failed-delete retry, image byte/type/size checks, stream limits and missing-EBS configuration rejection.
+- `npm run test:e2e`: isolated temporary SQLite and a local S3 protocol stub, with no real AWS access. Existing CRUD/view/drag/filter/mobile flows plus uploaded-cover preview, delivery, unchanged edit, replacement and failed-save retry. Build first; default port 3101, override with `PLAYWRIGHT_PORT`.
+- `npm run lint`, `npm run typecheck`, `npm run build`, migration deployment and dependency audit.
+
+Verified on 2026-09-30: all 9 unit/integration tests and 5 Chromium E2E tests passed, as did lint, typecheck, migration deployment, production build and `git diff --check`. Dependency audit reported zero vulnerabilities. These checks do not prove EC2 mounting, IAM permissions or real S3 behavior.
+
+### Owner validation required before completion
+
+The owner requested to perform live validation. Stop before EC2/AWS changes. Follow [the deployment guide](../deploy/README.md) to mount the attached EBS volume, configure IAM/private S3 and Nginx, deploy migrations and the app, install the cleanup timer, and configure EBS snapshot backups. Record CRUD, application restart, EC2 reboot, missing-mount refusal, upload limits, image delivery/cleanup, anonymous S3 denial and snapshot restore evidence. Phase 8 is not marked complete until those checks pass.
 
 ## Phase 9. Metadata autofill: optional, not implemented
 

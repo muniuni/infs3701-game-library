@@ -51,7 +51,7 @@ const isoDate = z
       !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value
     );
   }, "Enter a valid calendar date.");
-// Stage 1 accepts only sources the UI supports. The domain model retains future source types.
+// Upload references are server-owned and can only be created through multipart saves.
 const fields = {
   title: z.string().trim().min(1, "Title is required.").max(160),
   platforms: labels,

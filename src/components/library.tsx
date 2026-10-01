@@ -26,7 +26,7 @@ import { GameForm } from "./game-form";
 import {
   formatPlaytime,
   statuses,
-  type CreateGameInput,
+  type UpdateGameInput,
   type Game,
   type GameStatus,
 } from "@/lib/game";
@@ -38,7 +38,12 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, {
     cache: "no-store",
     ...init,
-    headers: { "Content-Type": "application/json", ...init?.headers },
+    headers: {
+      ...(init?.body instanceof FormData
+        ? {}
+        : { "Content-Type": "application/json" }),
+      ...init?.headers,
+    },
   });
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
@@ -106,15 +111,21 @@ export function Library() {
     setDialogError("");
     setDialog(next);
   }
-  async function save(input: CreateGameInput) {
+  async function save(input: UpdateGameInput, image?: File) {
     if (actionLock.current) return;
     actionLock.current = true;
     setBusy(true);
     setDialogError("");
     try {
+      let body: string | FormData = JSON.stringify(input);
+      if (image) {
+        body = new FormData();
+        body.append("input", JSON.stringify(input));
+        body.append("cover", image);
+      }
       const game = await request<Game>(
         selected ? `/api/games/${selected.id}` : "/api/games",
-        { method: selected ? "PATCH" : "POST", body: JSON.stringify(input) },
+        { method: selected ? "PATCH" : "POST", body },
       );
       setGames((previous) =>
         selected
@@ -195,9 +206,6 @@ export function Library() {
             <Gamepad2 size={24} aria-hidden="true" />
             <span>GAME LIBRARY</span>
           </div>
-          <span className="session-note">
-            In-memory edition <span className="session-dot" />
-          </span>
         </div>
         <section className="page-heading">
           <div>
@@ -405,9 +413,6 @@ export function Library() {
                 Clear filters
               </button>
             )}
-            <span className="reset-note">
-              Changes last until the server restarts.
-            </span>
           </div>
           {(filters.status ||
             filters.platform ||

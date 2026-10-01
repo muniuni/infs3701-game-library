@@ -7,3 +7,8 @@ out/
 .DS_Store
 playwright-report/
 test-results/
+
+data/
+src/generated/prisma/
+*.sqlite
+*.sqlite-*

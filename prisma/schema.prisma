@@ -1,0 +1,23 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model Game {
+  id       String @id
+  titleKey String @unique
+  data     Json
+  coverKey String? @unique
+}
+
+// Durable S3 cleanup ledger. Pending uploads expire after one day.
+model CoverObject {
+  key       String @id
+  state     String
+  updatedAt DateTime @updatedAt
+  @@index([state, updatedAt])
+}

@@ -1,4 +1,5 @@
-import { repository } from "@/lib/server-repository";
+import { readMutation } from "@/lib/mutation-body";
+import { getRepository } from "@/lib/server-repository";
 import { updateGameSchema } from "@/lib/game";
 import { apiError, notFound } from "@/lib/api";
 export const runtime = "nodejs";
@@ -6,7 +7,7 @@ export const dynamic = "force-dynamic";
 type Context = { params: Promise<{ id: string }> };
 export async function GET(_request: Request, context: Context) {
   try {
-    const game = await repository.getGame((await context.params).id);
+    const game = await getRepository().getGame((await context.params).id);
     return game
       ? Response.json(game, { headers: { "Cache-Control": "no-store" } })
       : notFound();
@@ -16,9 +17,11 @@ export async function GET(_request: Request, context: Context) {
 }
 export async function PATCH(request: Request, context: Context) {
   try {
-    const game = await repository.updateGame(
+    const { input, image } = await readMutation(request);
+    const game = await getRepository().updateGame(
       (await context.params).id,
-      updateGameSchema.parse(await request.json()),
+      updateGameSchema.parse(input),
+      image,
     );
     return game ? Response.json(game) : notFound();
   } catch (error) {
@@ -27,7 +30,7 @@ export async function PATCH(request: Request, context: Context) {
 }
 export async function DELETE(_request: Request, context: Context) {
   try {
-    return (await repository.deleteGame((await context.params).id))
+    return (await getRepository().deleteGame((await context.params).id))
       ? new Response(null, { status: 204 })
       : notFound();
   } catch (error) {

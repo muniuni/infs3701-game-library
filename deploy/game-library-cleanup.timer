@@ -1,0 +1,10 @@
+[Unit]
+Description=Retry queued cover deletions every five minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitInactiveSec=5min
+Unit=game-library-cleanup.service
+
+[Install]
+WantedBy=timers.target

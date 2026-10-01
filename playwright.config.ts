@@ -6,7 +6,7 @@ export default defineConfig({
   fullyParallel: false,
   use: { baseURL, trace: "retain-on-failure" },
   webServer: {
-    command: `npm run start -- --port ${port}`,
+    command: "node scripts/e2e-server.mjs",
     url: baseURL,
     reuseExistingServer: false,
   },

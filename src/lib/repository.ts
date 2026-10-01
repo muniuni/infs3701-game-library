@@ -18,7 +18,7 @@ export class DuplicateGameError extends Error {
     super("A game with this title already exists. Edit its platforms instead.");
   }
 }
-const titleKey = (title: string) =>
+export const titleKey = (title: string) =>
   title.normalize("NFKC").trim().replace(/\s+/g, " ").toLowerCase();
 function optionalFields(input: CreateGameInput | UpdateGameInput) {
   return Object.fromEntries(

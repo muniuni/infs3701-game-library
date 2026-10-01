@@ -2,25 +2,25 @@
 
 ## Current status
 
-The initial in-memory version is implemented. EC2 deployment (Phase 7) is complete, as confirmed by the project owner. Persistent storage and metadata integration remain planned.
+Phase 8 application code now uses Prisma/SQLite and private S3 covers. Local verification is documented in the implementation plan. EC2 deployment of Phase 7 was owner-confirmed; Phase 8 cloud deployment and validation are still pending. Metadata integration remains planned.
 
-A single-user personal game library with no authentication. The server owns the library; browser refreshes retain records, but restarting the server clears them. Development starts with six fictional games; production starts empty.
+A single-user personal game library with no authentication. The server owns the library. SQLite retains records across application restarts. New databases start empty; fictional fixtures remain available for tests but are not automatically seeded.
 
 ## Implemented data model
 
 The canonical types and validation are in `src/lib/game.ts`.
 
-| Field                          | Current behavior                                                                                                                 |
-| ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------- |
-| `id`, `createdAt`, `updatedAt` | Server-generated UUID and ISO timestamps                                                                                         |
-| `title`                        | Required, trimmed, up to 160 characters                                                                                          |
-| `platforms`, `tags`            | Arrays, default empty; up to 30 entries each, 1–60 characters per entry; trimmed and deduplicated case-insensitively             |
-| `status`                       | Unplayed (default), Playing, Completed, Backlog or Dropped                                                                       |
-| `releaseDate`                  | Optional valid calendar date in `YYYY-MM-DD` format                                                                              |
-| `playtimeMinutes`              | Optional non-negative safe integer; entered and displayed as hours/minutes                                                       |
-| `rating`                       | Optional integer from 1 to 10                                                                                                    |
-| `review`                       | Optional trimmed text, up to 10,000 characters                                                                                   |
-| `cover`                        | Defaults to `{ type: "placeholder" }`; also accepts `{ type: "url", url: string }` with an HTTP/HTTPS URL up to 2,048 characters |
+| Field                          | Current behavior                                                                                                                                                                      |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`, `createdAt`, `updatedAt` | Server-generated UUID and ISO timestamps                                                                                                                                              |
+| `title`                        | Required, trimmed, up to 160 characters                                                                                                                                               |
+| `platforms`, `tags`            | Arrays, default empty; up to 30 entries each, 1–60 characters per entry; trimmed and deduplicated case-insensitively                                                                  |
+| `status`                       | Unplayed (default), Playing, Completed, Backlog or Dropped                                                                                                                            |
+| `releaseDate`                  | Optional valid calendar date in `YYYY-MM-DD` format                                                                                                                                   |
+| `playtimeMinutes`              | Optional non-negative safe integer; entered and displayed as hours/minutes                                                                                                            |
+| `rating`                       | Optional integer from 1 to 10                                                                                                                                                         |
+| `review`                       | Optional trimmed text, up to 10,000 characters                                                                                                                                        |
+| `cover`                        | Defaults to `{ type: "placeholder" }`; also accepts `{ type: "url", url: string }` with an HTTP/HTTPS URL up to 2,048 characters; multipart saves create server-owned `upload` covers |
 
 Matching normalized titles identify the same game regardless of platform. Comparison uses Unicode NFKC normalization, trimmed/collapsed whitespace and lowercase. Duplicate titles are rejected; additional platforms belong on the existing record. Tags combine genres and user-defined labels. Forms use removable platform/tag tokens, confirmed with comma, Enter, Tab or blur. Repeated labels are deduplicated case-insensitively.
 
@@ -43,13 +43,19 @@ All views use the same browser-side query over fetched records. Kanban sorts wit
 - Default sort is recently added. Title sorts alphabetically; release date and timestamps sort newest first; rating and playtime sort highest first. Unset values come last, with title as the tiebreaker.
 - View, search and filter settings are not persisted across page reloads.
 
-## Covers and planned features
+## Covers and persistence
 
-Implemented covers are a bundled SVG placeholder and browser-loaded external URLs. Failed images fall back to the placeholder. Cover editing offers Placeholder and Image URL controls; uploads are not available.
+Covers support the bundled placeholder, browser-loaded HTTP/HTTPS URLs and uploaded images delivered through `/api/covers/:id`. Failed images fall back to the placeholder. JPEG, PNG and WebP uploads are limited to 5 MiB, 40 megapixels and still images. The server validates and decodes the bytes, re-encodes to remove metadata, and rejects unsupported or corrupt files.
 
-The TypeScript `Cover` type also includes `upload` and `api`, but current input validation rejects both. There is no upload endpoint or metadata search.
+Uploads are sent with the game save as multipart data. SQLite stores the S3 object reference. Editing without changing an upload preserves it; replacing the cover or deleting the game queues the old object for deletion after the database commit. Failed deletes retry through a durable ledger and scheduled cleanup. Unattached uploads left by a crash expire after 24 hours. A failed save preserves the form and selected image for retry; cancelling before save uploads nothing.
 
-Planned work is SQLite game storage on EBS-backed EC2 storage, S3 uploads, and optional server-side RAWG autofill with editable imported values. Manual entry must remain available.
+Local SQLite defaults to `data/game-library.sqlite`. EC2 configuration requires the separate EBS filesystem at `/mnt/game-library-data`, its UUID, and database `/mnt/game-library-data/game-library.sqlite`. Startup and migration fail if that filesystem is unavailable. Existing in-memory records need no migration.
+
+S3 uses bucket `infs3701-game-library-images`, `us-east-1`, through the AWS SDK credential chain. Production uses an EC2 IAM role and private objects, with uploads and delivery routed through Next.js. Bucket privacy does not restrict access to this unauthenticated application's endpoints.
+
+The owner has created and attached the EBS volume and created the bucket. Mounting, IAM, bucket privacy, restart persistence and EBS snapshot backup/restore must still be validated by the owner using [the deployment guide](../deploy/README.md). EBS snapshots cover SQLite, not S3 object contents.
+
+Phase 9 remains optional server-side RAWG autofill with editable imported values; `api` covers remain reserved and rejected by validation. Manual entry remains available. Phase 10 extensions remain unselected.
 
 ## Out of scope
 

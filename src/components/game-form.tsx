@@ -3,14 +3,14 @@ import { useEffect, useRef, useState } from "react";
 import {
   statuses,
   type Game,
-  type CreateGameInput,
+  type UpdateGameInput,
   createGameSchema,
 } from "@/lib/game";
 import { Button } from "./ui/button";
 import { Select } from "./ui/select";
 import { GameCover } from "./game-cover";
 import { TokenInput } from "./token-input";
-import { Pencil, Star, Image as ImageIcon, Link } from "lucide-react";
+import { Pencil, Star, Image as ImageIcon, Link, Upload } from "lucide-react";
 export function GameForm({
   game,
   busy,
@@ -19,14 +19,26 @@ export function GameForm({
 }: {
   game?: Game;
   busy: boolean;
-  onSave: (input: CreateGameInput) => Promise<void>;
+  onSave: (input: UpdateGameInput, image?: File) => Promise<void>;
   onCancel: () => void;
 }) {
   const [coverType, setCoverType] = useState(
-    game?.cover.type === "url" ? "url" : "placeholder",
+    game?.cover.type === "upload"
+      ? "upload"
+      : game?.cover.type === "url"
+        ? "url"
+        : "placeholder",
   );
   const [coverUrl, setCoverUrl] = useState(
     game?.cover.type === "url" ? game.cover.url : "",
+  );
+  const [image, setImage] = useState<File>();
+  const [preview, setPreview] = useState<string>();
+  useEffect(
+    () => () => {
+      if (preview) URL.revokeObjectURL(preview);
+    },
+    [preview],
   );
   const [rating, setRating] = useState(game?.rating ?? 0);
   const [hoverRating, setHoverRating] = useState<number | null>(null);
@@ -71,8 +83,14 @@ export function GameForm({
       setError(parsed.error.issues.map((issue) => issue.message).join(" "));
       return;
     }
+    if (coverType === "upload" && !image && game?.cover.type !== "upload") {
+      setError("Choose a cover image.");
+      return;
+    }
     setError("");
-    await onSave(parsed.data);
+    const savedInput: UpdateGameInput = { ...parsed.data };
+    if (coverType === "upload" && !image) delete savedInput.cover;
+    await onSave(savedInput, coverType === "upload" ? image : undefined);
   }
   return (
     <form onSubmit={submit} className="game-form">
@@ -82,9 +100,15 @@ export function GameForm({
             <div className="form-cover-preview">
               <GameCover
                 cover={
-                  coverType === "url" && /^https?:\/\//i.test(coverUrl)
-                    ? { type: "url", url: coverUrl }
-                    : { type: "placeholder" }
+                  coverType === "upload"
+                    ? preview
+                      ? { type: "upload", url: preview }
+                      : game?.cover.type === "upload"
+                        ? game.cover
+                        : { type: "placeholder" }
+                    : coverType === "url" && /^https?:\/\//i.test(coverUrl)
+                      ? { type: "url", url: coverUrl }
+                      : { type: "placeholder" }
                 }
                 title={game?.title || "Game"}
               />
@@ -122,7 +146,43 @@ export function GameForm({
                     <Link size={15} />
                     Image URL
                   </button>
+                  <button
+                    type="button"
+                    aria-pressed={coverType === "upload"}
+                    onClick={() => setCoverType("upload")}
+                  >
+                    <Upload size={15} /> Upload
+                  </button>
                 </div>
+                {coverType === "upload" && (
+                  <label>
+                    Cover image
+                    <input
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp"
+                      onChange={(event) => {
+                        const file = event.target.files?.[0];
+                        if (!file) return;
+                        if (
+                          !["image/jpeg", "image/png", "image/webp"].includes(
+                            file.type,
+                          ) ||
+                          !file.size ||
+                          file.size > 5 * 1024 * 1024
+                        ) {
+                          setError(
+                            "Choose a JPEG, PNG or WebP image up to 5 MB.",
+                          );
+                          event.target.value = "";
+                          return;
+                        }
+                        setError("");
+                        setImage(file);
+                        setPreview(URL.createObjectURL(file));
+                      }}
+                    />
+                  </label>
+                )}
                 {coverType === "url" && (
                   <label>
                     Cover URL
@@ -136,9 +196,11 @@ export function GameForm({
                   </label>
                 )}
                 <p className="cover-hint">
-                  {coverType === "url"
-                    ? "Use a direct HTTPS or HTTP image link."
-                    : "Use the default cover. You can add an image URL anytime."}
+                  {coverType === "upload"
+                    ? "JPEG, PNG or WebP, up to 5 MB and 40 megapixels. Still images only. Uploaded when you save."
+                    : coverType === "url"
+                      ? "Use a direct HTTPS or HTTP image link."
+                      : "Use the default cover. You can add an image URL anytime."}
                 </p>
                 <button
                   type="button"
@@ -319,7 +381,13 @@ export function GameForm({
           Cancel
         </Button>
         <Button type="submit" disabled={busy}>
-          {busy ? "Saving…" : game ? "Save changes" : "Create game"}
+          {busy
+            ? coverType === "upload" && image
+              ? "Uploading and saving…"
+              : "Saving…"
+            : game
+              ? "Save changes"
+              : "Create game"}
         </Button>
       </div>
     </form>

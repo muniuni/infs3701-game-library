@@ -452,3 +452,71 @@ test("filter recovery, narrow layouts and visible form validation", async ({
     await request.delete(`/api/games/${game.id}`);
   }
 });
+
+test("uploaded cover preview, save, unchanged edit, replacement and failed-save retry", async ({
+  page,
+  request,
+}) => {
+  const title = `Upload ${Date.now()}`;
+  // Use a valid decoded PNG generated locally, independent of external resources.
+  const sharp = (await import("sharp")).default;
+  const image = await sharp({
+    create: { width: 8, height: 8, channels: 3, background: "red" },
+  })
+    .png()
+    .toBuffer();
+  await page.goto("/");
+  await page
+    .locator("header")
+    .getByRole("button", { name: "Add Game", exact: true })
+    .click();
+  await page.getByRole("textbox", { name: "Title" }).fill(title);
+  await page.getByRole("button", { name: "Edit cover", exact: true }).click();
+  await page.getByRole("button", { name: "Upload", exact: true }).click();
+  await page
+    .getByLabel("Cover image")
+    .setInputFiles({ name: "cover.png", mimeType: "image/png", buffer: image });
+  await expect(page.locator(".form-cover-preview img")).toHaveAttribute(
+    "src",
+    /^blob:/,
+  );
+  await page.route("**/api/games", async (route) => {
+    if (route.request().method() === "POST") {
+      await route.fulfill({
+        status: 503,
+        json: { error: "Temporary save failure. Try again." },
+      });
+    } else await route.continue();
+  });
+  await page.getByRole("button", { name: "Create game", exact: true }).click();
+  await expect(page.getByRole("alert")).toContainText("Temporary save failure");
+  await page.unroute("**/api/games");
+  await page.getByRole("button", { name: "Create game", exact: true }).click();
+  await expect(
+    page.getByRole("button", { name: "Edit", exact: true }),
+  ).toBeVisible();
+  const games = await (await request.get("/api/games")).json();
+  const game = games.find((item: { title: string }) => item.title === title);
+  expect(game.cover.type).toBe("upload");
+  const cover = await request.get(game.cover.url);
+  expect(cover.status()).toBe(200);
+  expect(cover.headers()["content-type"]).toBe("image/png");
+  await page.getByRole("button", { name: "Edit", exact: true }).click();
+  await page.getByRole("textbox", { name: "Title" }).fill(`${title} edited`);
+  await page.getByRole("button", { name: "Save changes", exact: true }).click();
+  await expect(
+    page.getByRole("button", { name: "Edit", exact: true }),
+  ).toBeVisible();
+  expect(
+    (await (await request.get(`/api/games/${game.id}`)).json()).cover,
+  ).toEqual(game.cover);
+  await page.getByRole("button", { name: "Edit", exact: true }).click();
+  await page.getByRole("button", { name: "Edit cover", exact: true }).click();
+  await page.getByRole("button", { name: "Placeholder", exact: true }).click();
+  await page.getByRole("button", { name: "Save changes", exact: true }).click();
+  await expect(
+    page.getByRole("button", { name: "Edit", exact: true }),
+  ).toBeVisible();
+  expect((await request.get(game.cover.url)).status()).toBe(404);
+  await request.delete(`/api/games/${game.id}`);
+});

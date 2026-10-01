@@ -1,0 +1,15 @@
+[Unit]
+Description=Retry game library cover cleanup
+RequiresMountsFor=/mnt/game-library-data
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=ec2-user
+WorkingDirectory=/home/ec2-user/infs3701-game-library
+EnvironmentFile=/home/ec2-user/infs3701-game-library/.env
+Environment=NODE_ENV=production
+# Adjust this PATH to include the directory from `command -v node` on EC2.
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+ExecStart=/usr/bin/env npm run covers:cleanup
+TimeoutStartSec=15min

@@ -1,6 +1,9 @@
+import { UploadError } from "./cover-storage";
 import { ZodError } from "zod";
 import { DuplicateGameError } from "./repository";
 export function apiError(error: unknown) {
+  if (error instanceof UploadError)
+    return Response.json({ error: error.message }, { status: error.status });
   if (error instanceof ZodError)
     return Response.json(
       {
