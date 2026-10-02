@@ -252,20 +252,29 @@ test("sidebar filters, token entry and cover preview", async ({
     await page.getByRole("radio", { name: "8 out of 10", exact: true }).check();
     await page.getByRole("combobox", { name: "Status", exact: true }).click();
     await page.getByRole("option", { name: "Playing", exact: true }).click();
-    await page.getByRole("button", { name: "Edit cover" }).click();
+
     const formCover = await page.locator(".form-cover-preview").boundingBox();
+    const titleInput = await page
+      .getByRole("textbox", { name: "Title", exact: true })
+      .boundingBox();
+    const statusInput = await page
+      .getByRole("combobox", { name: "Status", exact: true })
+      .boundingBox();
     expect(formCover!.width / formCover!.height).toBeCloseTo(4 / 3, 2);
-    await page.getByRole("button", { name: "Image URL", exact: true }).click();
-    await expect(page.getByLabel("Cover URL")).toBeFocused();
-    await page.screenshot({ path: "test-results/cover-editor.png" });
-    await page.route("https://example.com/cover.jpg", (route) => route.abort());
-    await page.getByLabel("Cover URL").fill("https://example.com/cover.jpg");
-    await page.getByLabel("Cover URL").press("Tab");
+    expect(formCover!.y).toBeCloseTo(titleInput!.y, 0);
+    expect(formCover!.y + formCover!.height).toBeCloseTo(
+      statusInput!.y + statusInput!.height,
+      0,
+    );
+    await expect(
+      page.getByRole("button", { name: "Image URL", exact: true }),
+    ).toHaveCount(0);
+    await expect(page.getByLabel("Cover URL")).toHaveCount(0);
     await expect(page.locator(".form-cover-preview img")).toHaveAttribute(
       "src",
       "/cover-placeholder.svg",
     );
-    await page.getByRole("button", { name: "Edit cover" }).click();
+
     await page.screenshot({
       path: "test-results/refined-form.png",
       fullPage: true,
@@ -289,7 +298,7 @@ test("sidebar filters, token entry and cover preview", async ({
     expect(saved.status).toBe("Playing");
     expect(saved.platforms).toEqual(["Switch"]);
     expect(saved.tags).toEqual(["Puzzle", "Favourite"]);
-    expect(saved.cover.url).toBe("https://example.com/cover.jpg");
+    expect(saved.cover.type).toBe("placeholder");
     await page.getByRole("button", { name: "Edit", exact: true }).click();
     await expect(
       page.getByRole("radio", { name: "8 out of 10", exact: true }),
@@ -427,16 +436,8 @@ test("filter recovery, narrow layouts and visible form validation", async ({
       .getByRole("button", { name: "Add Game", exact: true })
       .first()
       .click();
-    await page
-      .getByRole("textbox", { name: "Title", exact: true })
-      .fill("Validation fixture");
-    await page.getByRole("button", { name: "Edit cover", exact: true }).click();
-    await page.getByRole("button", { name: "Image URL", exact: true }).click();
-    await page.getByLabel("Cover URL").fill("ftp://example.com/cover.jpg");
-    await page.getByRole("button", { name: "Done", exact: true }).click();
-    await expect(
-      page.getByRole("button", { name: "Edit cover", exact: true }),
-    ).toBeFocused();
+    await page.getByRole("textbox", { name: "Title", exact: true }).fill("   ");
+
     await page
       .getByRole("button", { name: "Create game", exact: true })
       .click();
@@ -471,15 +472,58 @@ test("uploaded cover preview, save, unchanged edit, replacement and failed-save 
     .getByRole("button", { name: "Add Game", exact: true })
     .click();
   await page.getByRole("textbox", { name: "Title" }).fill(title);
-  await page.getByRole("button", { name: "Edit cover", exact: true }).click();
-  await page.getByRole("button", { name: "Upload", exact: true }).click();
+  await expect(page.locator(".cover-controls")).toHaveCount(0);
+  await expect(page.getByLabel("Cover URL")).toHaveCount(0);
+  // Upload is available immediately, without opening the source controls.
+  await page.getByLabel("Upload cover image", { exact: true }).setInputFiles({
+    name: "notes.txt",
+    mimeType: "text/plain",
+    buffer: Buffer.from("not an image"),
+  });
+  await expect(page.getByRole("alert")).toHaveText(
+    "Choose a JPEG, PNG or WebP image.",
+  );
   await page
-    .getByLabel("Cover image")
+    .getByLabel("Upload cover image", { exact: true })
     .setInputFiles({ name: "cover.png", mimeType: "image/png", buffer: image });
   await expect(page.locator(".form-cover-preview img")).toHaveAttribute(
     "src",
     /^blob:/,
   );
+  const initialPreview = await page
+    .locator(".form-cover-preview img")
+    .getAttribute("src");
+  await page.getByLabel("Upload cover image", { exact: true }).setInputFiles({
+    name: "invalid.txt",
+    mimeType: "text/plain",
+    buffer: Buffer.from("invalid"),
+  });
+  await expect(page.locator(".form-cover-preview img")).toHaveAttribute(
+    "src",
+    initialPreview!,
+  );
+  const transfer = await page.evaluateHandle((bytes) => {
+    const data = new DataTransfer();
+    data.items.add(
+      new File([new Uint8Array(bytes)], "dropped.png", { type: "image/png" }),
+    );
+    return data;
+  }, Array.from(image));
+  await page
+    .locator(".cover-dropzone")
+    .dispatchEvent("drop", { dataTransfer: transfer });
+  await transfer.dispose();
+  await expect(page.locator(".form-cover-preview img")).toHaveAttribute(
+    "src",
+    /^blob:/,
+  );
+  await expect(page.getByRole("alert")).toHaveCount(0);
+  await page.screenshot({ path: "test-results/cover-upload-desktop.png" });
+  await page.setViewportSize({ width: 375, height: 812 });
+  await page.screenshot({ path: "test-results/cover-upload-mobile.png" });
+  const uploadBounds = await page.locator(".cover-dropzone").boundingBox();
+  expect(uploadBounds!.x + uploadBounds!.width).toBeLessThanOrEqual(375);
+  await page.setViewportSize({ width: 1280, height: 720 });
   await page.route("**/api/games", async (route) => {
     if (route.request().method() === "POST") {
       await route.fulfill({
@@ -511,8 +555,22 @@ test("uploaded cover preview, save, unchanged edit, replacement and failed-save 
     (await (await request.get(`/api/games/${game.id}`)).json()).cover,
   ).toEqual(game.cover);
   await page.getByRole("button", { name: "Edit", exact: true }).click();
-  await page.getByRole("button", { name: "Edit cover", exact: true }).click();
-  await page.getByRole("button", { name: "Placeholder", exact: true }).click();
+
+  await page.getByLabel("Upload cover image", { exact: true }).setInputFiles({
+    name: "replacement.png",
+    mimeType: "image/png",
+    buffer: image,
+  });
+  await page.getByRole("button", { name: "Cancel", exact: true }).click();
+  expect(
+    (await (await request.get(`/api/games/${game.id}`)).json()).cover,
+  ).toEqual(game.cover);
+  await page.getByRole("button", { name: "Edit", exact: true }).click();
+  await page.getByLabel("Upload cover image", { exact: true }).setInputFiles({
+    name: "replacement.png",
+    mimeType: "image/png",
+    buffer: image,
+  });
   await page.getByRole("button", { name: "Save changes", exact: true }).click();
   await expect(
     page.getByRole("button", { name: "Edit", exact: true }),

@@ -10,7 +10,7 @@ import { Button } from "./ui/button";
 import { Select } from "./ui/select";
 import { GameCover } from "./game-cover";
 import { TokenInput } from "./token-input";
-import { Pencil, Star, Image as ImageIcon, Link, Upload } from "lucide-react";
+import { Star, Upload } from "lucide-react";
 export function GameForm({
   game,
   busy,
@@ -22,17 +22,33 @@ export function GameForm({
   onSave: (input: UpdateGameInput, image?: File) => Promise<void>;
   onCancel: () => void;
 }) {
-  const [coverType, setCoverType] = useState(
-    game?.cover.type === "upload"
-      ? "upload"
-      : game?.cover.type === "url"
-        ? "url"
-        : "placeholder",
-  );
-  const [coverUrl, setCoverUrl] = useState(
-    game?.cover.type === "url" ? game.cover.url : "",
-  );
   const [image, setImage] = useState<File>();
+  const [uploadError, setUploadError] = useState("");
+  const [dragging, setDragging] = useState(false);
+  const uploadErrorRef = useRef<HTMLParagraphElement>(null);
+  useEffect(() => {
+    if (uploadError) uploadErrorRef.current?.focus();
+  }, [uploadError]);
+  function selectImage(files: File[]) {
+    if (busy || !files.length) return;
+    const file = files[0];
+    if (files.length !== 1) {
+      setUploadError("Choose one image at a time.");
+      return;
+    }
+    if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
+      setUploadError("Choose a JPEG, PNG or WebP image.");
+      return;
+    }
+    if (!file.size || file.size > 5 * 1024 * 1024) {
+      setUploadError("Choose a non-empty image up to 5 MB.");
+      return;
+    }
+    setUploadError("");
+    setError("");
+    setImage(file);
+    setPreview(URL.createObjectURL(file));
+  }
   const [preview, setPreview] = useState<string>();
   useEffect(
     () => () => {
@@ -42,10 +58,8 @@ export function GameForm({
   );
   const [rating, setRating] = useState(game?.rating ?? 0);
   const [hoverRating, setHoverRating] = useState<number | null>(null);
-  const [editingCover, setEditingCover] = useState(false);
   const [error, setError] = useState("");
   const errorSummary = useRef<HTMLParagraphElement>(null);
-  const coverButton = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     if (error) {
       errorSummary.current?.focus();
@@ -73,159 +87,119 @@ export function GameForm({
         hours || minutes ? Number(hours) * 60 + Number(minutes) : null,
       rating: rating || null,
       review: value("review") || null,
-      cover:
-        coverType === "url"
-          ? { type: "url", url: coverUrl.trim() }
-          : { type: "placeholder" },
+      cover: { type: "placeholder" },
     };
     const parsed = createGameSchema.safeParse(input);
     if (!parsed.success) {
       setError(parsed.error.issues.map((issue) => issue.message).join(" "));
       return;
     }
-    if (coverType === "upload" && !image && game?.cover.type !== "upload") {
-      setError("Choose a cover image.");
-      return;
-    }
     setError("");
     const savedInput: UpdateGameInput = { ...parsed.data };
-    if (coverType === "upload" && !image) delete savedInput.cover;
-    await onSave(savedInput, coverType === "upload" ? image : undefined);
+    if (game && !image) delete savedInput.cover;
+    await onSave(savedInput, image);
   }
+  const hasCover = !!image || (!!game && game.cover.type !== "placeholder");
   return (
     <form onSubmit={submit} className="game-form">
       <div className="form-fields">
         <fieldset disabled={busy}>
-          <div className="cover-editor">
-            <div className="form-cover-preview">
-              <GameCover
-                cover={
-                  coverType === "upload"
-                    ? preview
-                      ? { type: "upload", url: preview }
-                      : game?.cover.type === "upload"
-                        ? game.cover
-                        : { type: "placeholder" }
-                    : coverType === "url" && /^https?:\/\//i.test(coverUrl)
-                      ? { type: "url", url: coverUrl }
-                      : { type: "placeholder" }
-                }
-                title={game?.title || "Game"}
-              />
-              <button
-                type="button"
-                className="cover-edit-action"
-                ref={coverButton}
-                aria-expanded={editingCover}
-                aria-controls="cover-controls"
-                onClick={() => setEditingCover(!editingCover)}
-              >
-                <Pencil size={14} /> Edit cover
-              </button>
-            </div>
-            {editingCover && (
-              <div id="cover-controls" className="cover-controls">
-                <div
-                  className="cover-source-options"
-                  role="group"
-                  aria-label="Cover source"
-                >
-                  <button
-                    type="button"
-                    aria-pressed={coverType === "placeholder"}
-                    onClick={() => setCoverType("placeholder")}
-                  >
-                    <ImageIcon size={15} />
-                    Placeholder
-                  </button>
-                  <button
-                    type="button"
-                    aria-pressed={coverType === "url"}
-                    onClick={() => setCoverType("url")}
-                  >
-                    <Link size={15} />
-                    Image URL
-                  </button>
-                  <button
-                    type="button"
-                    aria-pressed={coverType === "upload"}
-                    onClick={() => setCoverType("upload")}
-                  >
-                    <Upload size={15} /> Upload
-                  </button>
-                </div>
-                {coverType === "upload" && (
-                  <label>
-                    Cover image
-                    <input
-                      type="file"
-                      accept="image/jpeg,image/png,image/webp"
-                      onChange={(event) => {
-                        const file = event.target.files?.[0];
-                        if (!file) return;
-                        if (
-                          !["image/jpeg", "image/png", "image/webp"].includes(
-                            file.type,
-                          ) ||
-                          !file.size ||
-                          file.size > 5 * 1024 * 1024
-                        ) {
-                          setError(
-                            "Choose a JPEG, PNG or WebP image up to 5 MB.",
-                          );
-                          event.target.value = "";
-                          return;
-                        }
-                        setError("");
-                        setImage(file);
-                        setPreview(URL.createObjectURL(file));
-                      }}
-                    />
-                  </label>
-                )}
-                {coverType === "url" && (
-                  <label>
-                    Cover URL
-                    <input
-                      type="url"
-                      autoFocus
-                      value={coverUrl}
-                      onChange={(event) => setCoverUrl(event.target.value)}
-                      placeholder="https://example.com/cover.jpg"
-                    />
-                  </label>
-                )}
-                <p className="cover-hint">
-                  {coverType === "upload"
-                    ? "JPEG, PNG or WebP, up to 5 MB and 40 megapixels. Still images only. Uploaded when you save."
-                    : coverType === "url"
-                      ? "Use a direct HTTPS or HTTP image link."
-                      : "Use the default cover. You can add an image URL anytime."}
-                </p>
-                <button
-                  type="button"
-                  className="cover-done"
-                  onClick={() => {
-                    setEditingCover(false);
-                    coverButton.current?.focus();
+          <div className="form-overview">
+            <section className="cover-section" aria-labelledby="cover-heading">
+              <h3 id="cover-heading" className="field-label">
+                Cover image
+              </h3>
+              <div className="cover-editor">
+                <label
+                  className={`form-cover-preview cover-dropzone${dragging ? " is-dragging" : ""}`}
+                  onDragOver={(event) => {
+                    event.preventDefault();
+                    if (!busy) setDragging(true);
+                  }}
+                  onDragLeave={(event) => {
+                    if (
+                      !event.currentTarget.contains(
+                        event.relatedTarget as Node | null,
+                      )
+                    )
+                      setDragging(false);
+                  }}
+                  onDrop={(event) => {
+                    event.preventDefault();
+                    setDragging(false);
+                    selectImage(Array.from(event.dataTransfer.files));
                   }}
                 >
-                  Done
-                </button>
+                  <GameCover
+                    cover={
+                      preview
+                        ? { type: "upload", url: preview }
+                        : (game?.cover ?? { type: "placeholder" })
+                    }
+                    title={game?.title || "Game"}
+                  />
+                  <span className="cover-preview-action">
+                    <Upload size={14} aria-hidden="true" />
+                    {dragging
+                      ? "Drop image"
+                      : hasCover
+                        ? "Change image"
+                        : "Upload image"}
+                  </span>
+                  <input
+                    type="file"
+                    aria-label="Upload cover image"
+                    aria-invalid={!!uploadError}
+                    aria-errormessage={
+                      uploadError ? "cover-upload-error" : undefined
+                    }
+                    accept="image/jpeg,image/png,image/webp"
+                    onChange={(event) => {
+                      selectImage(Array.from(event.target.files ?? []));
+                      event.target.value = "";
+                    }}
+                  />
+                </label>
               </div>
-            )}
+              {uploadError && (
+                <p
+                  id="cover-upload-error"
+                  className="cover-upload-error"
+                  role="alert"
+                  tabIndex={-1}
+                  ref={uploadErrorRef}
+                >
+                  {uploadError}
+                </p>
+              )}
+            </section>
+            <div className="form-identity">
+              <label>
+                Title <span aria-hidden="true">*</span>
+                <input
+                  name="title"
+                  defaultValue={game?.title}
+                  required
+                  maxLength={160}
+                  placeholder="Game title"
+                  autoFocus
+                />
+              </label>
+              <label>
+                Status
+                <Select
+                  name="status"
+                  label="Status"
+                  defaultValue={game?.status ?? "Unplayed"}
+                  disabled={busy}
+                  options={statuses.map((status) => ({
+                    value: status,
+                    label: status,
+                  }))}
+                />
+              </label>
+            </div>
           </div>
-          <label>
-            Title <span aria-hidden="true">*</span>
-            <input
-              name="title"
-              defaultValue={game?.title}
-              required
-              maxLength={160}
-              placeholder="Game title"
-              autoFocus
-            />
-          </label>
           <div className="form-pair">
             <TokenInput
               name="platforms"
@@ -236,19 +210,6 @@ export function GameForm({
           </div>
           <div className="form-pair">
             <label>
-              Status
-              <Select
-                name="status"
-                label="Status"
-                defaultValue={game?.status ?? "Unplayed"}
-                disabled={busy}
-                options={statuses.map((status) => ({
-                  value: status,
-                  label: status,
-                }))}
-              />
-            </label>
-            <label>
               Release date
               <input
                 name="releaseDate"
@@ -256,44 +217,44 @@ export function GameForm({
                 defaultValue={game?.releaseDate}
               />
             </label>
-          </div>
-          <div className="playtime-field">
-            <div>
-              <span className="field-label">Playtime</span>
-              <div className="playtime-inputs">
-                <label>
-                  <input
-                    aria-label="Playtime hours"
-                    name="hours"
-                    type="number"
-                    min="0"
-                    step="1"
-                    defaultValue={
-                      game?.playtimeMinutes === undefined
-                        ? ""
-                        : Math.floor(game.playtimeMinutes / 60)
-                    }
-                    placeholder="0"
-                  />
-                  <small>Hours</small>
-                </label>
-                <label>
-                  <input
-                    aria-label="Playtime minutes"
-                    name="minutes"
-                    type="number"
-                    min="0"
-                    max="59"
-                    step="1"
-                    defaultValue={
-                      game?.playtimeMinutes === undefined
-                        ? ""
-                        : game.playtimeMinutes % 60
-                    }
-                    placeholder="0"
-                  />
-                  <small>Minutes</small>
-                </label>
+            <div className="playtime-field">
+              <div>
+                <span className="field-label">Playtime</span>
+                <div className="playtime-inputs">
+                  <label>
+                    <input
+                      aria-label="Playtime hours"
+                      name="hours"
+                      type="number"
+                      min="0"
+                      step="1"
+                      defaultValue={
+                        game?.playtimeMinutes === undefined
+                          ? ""
+                          : Math.floor(game.playtimeMinutes / 60)
+                      }
+                      placeholder="0"
+                    />
+                    <small aria-hidden="true">h</small>
+                  </label>
+                  <label>
+                    <input
+                      aria-label="Playtime minutes"
+                      name="minutes"
+                      type="number"
+                      min="0"
+                      max="59"
+                      step="1"
+                      defaultValue={
+                        game?.playtimeMinutes === undefined
+                          ? ""
+                          : game.playtimeMinutes % 60
+                      }
+                      placeholder="0"
+                    />
+                    <small aria-hidden="true">m</small>
+                  </label>
+                </div>
               </div>
             </div>
           </div>
@@ -382,7 +343,7 @@ export function GameForm({
         </Button>
         <Button type="submit" disabled={busy}>
           {busy
-            ? coverType === "upload" && image
+            ? image
               ? "Uploading and saving…"
               : "Saving…"
             : game

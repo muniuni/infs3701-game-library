@@ -578,7 +578,7 @@ h1 {
   margin: 0;
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 24px;
   min-width: 0;
 }
 .game-form label,
@@ -611,16 +611,25 @@ h1 {
 .form-pair {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 18px;
+  gap: 24px;
 }
 .playtime-inputs {
   display: flex;
   gap: 12px;
   margin-top: 8px;
 }
-.playtime-inputs label {
+.game-form .playtime-inputs label {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
   min-width: 0;
-  flex: 1;
+}
+.game-form .playtime-inputs input {
+  width: 76px;
+  text-align: center;
+}
+.game-form .playtime-inputs small {
+  font-size: 13px;
 }
 .dialog-actions {
   display: flex;
@@ -821,7 +830,7 @@ dd {
     gap: 12px;
   }
   .game-detail {
-    grid-template-columns: 160px minmax(0, 1fr);
+    grid-template-columns: auto minmax(0, 1fr);
     gap: 16px;
   }
   dl {
@@ -1059,48 +1068,6 @@ dd {
   flex-shrink: 0;
   color: var(--text-muted);
 }
-.cover-editor {
-  display: flex;
-  gap: 20px;
-  align-items: flex-start;
-}
-.form-cover-preview {
-  width: 200px;
-  aspect-ratio: 4/3;
-  position: relative;
-  flex-shrink: 0;
-  border-radius: 8px;
-  overflow: hidden;
-}
-.form-cover-preview img {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-.cover-edit-action {
-  position: absolute;
-  bottom: 8px;
-  left: 8px;
-  right: 8px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  padding: 9px 4px;
-  background: #171a1df2;
-  border: 1px solid var(--text-faint);
-  border-radius: 5px;
-  font-size: 11px;
-}
-.cover-controls {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  flex: 1;
-  min-width: 0;
-}
 @media (max-width: 1000px) {
   .library-layout {
     grid-template-columns: 170px minmax(0, 1fr);
@@ -1184,20 +1151,6 @@ dd {
     grid-row: 2;
     justify-self: end;
     font-size: 11px;
-  }
-  .cover-editor {
-    gap: 12px;
-  }
-  .form-cover-preview {
-    width: 160px;
-  }
-}
-@media (max-width: 380px) {
-  .cover-editor {
-    flex-direction: column;
-  }
-  .cover-controls {
-    width: 100%;
   }
 }
 
@@ -1408,48 +1361,6 @@ dd {
   background: var(--surface-hover);
   border-color: var(--text-faint);
 }
-.cover-controls {
-  padding: 12px;
-  border-radius: 8px;
-  background: var(--surface);
-  gap: 12px;
-}
-.cover-source-options {
-  display: flex;
-  gap: 4px;
-  flex-wrap: wrap;
-}
-.cover-source-options button {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  border-radius: 5px;
-  padding: 8px 10px;
-  color: var(--text-muted);
-  font-size: 12px;
-}
-.cover-source-options button[aria-pressed="true"] {
-  background: var(--surface-hover);
-  color: var(--text);
-}
-.cover-source-options button:hover {
-  color: var(--text);
-}
-.cover-hint {
-  color: var(--text-muted);
-  font-size: 11px;
-  line-height: 1.6;
-}
-.cover-done {
-  align-self: flex-end;
-  padding: 6px 10px;
-  border-radius: 4px;
-  background: var(--surface-hover);
-  font-size: 12px;
-}
-.cover-edit-action:hover {
-  background: var(--surface-hover);
-}
 .rating-field-heading {
   display: flex;
   align-items: center;
@@ -1498,15 +1409,6 @@ dd {
   cursor: default;
 }
 @media (max-width: 560px) {
-  .cover-editor {
-    flex-direction: column;
-  }
-  .cover-controls {
-    width: 100%;
-  }
-  .form-cover-preview {
-    width: 180px;
-  }
   .game-form .star-choice {
     padding: 9px 3px;
   }
@@ -1617,7 +1519,6 @@ dd {
 .kanban-card {
   scroll-margin-top: 172px;
 }
-.cover-done:hover,
 .input-token button:hover {
   color: var(--text);
   background: var(--surface-hover);
@@ -1645,7 +1546,7 @@ dd {
 @media (max-width: 560px) {
   .form-pair {
     grid-template-columns: 1fr;
-    gap: 18px;
+    gap: 24px;
   }
   .form-dialog .dialog-description {
     margin-bottom: 18px;
@@ -1670,5 +1571,107 @@ dd {
   }
   .game-list .list-title h2 {
     font-size: 13px;
+  }
+}
+
+/* Compact cover field, shared by create and edit. */
+.cover-section {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  gap: 8px;
+}
+.cover-editor {
+  display: flex;
+  align-items: stretch;
+  gap: 16px;
+}
+.game-form .form-cover-preview {
+  width: auto;
+  height: 100%;
+  aspect-ratio: 4 / 3;
+  min-height: 0;
+  position: relative;
+  flex-shrink: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+  cursor: pointer;
+}
+.form-cover-preview img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.game-form .cover-preview-action {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  padding: 9px 4px;
+  color: var(--text);
+  background: #171a1ded;
+  font-size: 11px;
+  font-weight: 500;
+}
+.cover-dropzone:hover,
+.cover-dropzone.is-dragging {
+  border-color: var(--accent);
+}
+.cover-dropzone:focus-within {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+.cover-dropzone.is-dragging .cover-preview-action {
+  background: var(--accent);
+  color: white;
+}
+.game-form .cover-dropzone input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
+.cover-upload-error {
+  color: var(--danger);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.game-form fieldset:disabled .cover-section {
+  opacity: 0.6;
+}
+@media (max-width: 560px) {
+  .cover-editor {
+    gap: 12px;
+  }
+}
+
+.form-dialog .dialog-title {
+  margin-bottom: 24px;
+}
+.form-overview {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 24px;
+  align-items: stretch;
+}
+.form-identity {
+  display: grid;
+  gap: 24px;
+  min-width: 0;
+}
+.form-pair > * {
+  min-width: 0;
+}
+@media (max-width: 560px) {
+  .form-overview {
+    gap: 16px;
   }
 }

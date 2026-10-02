@@ -704,6 +704,9 @@ export function Library() {
                 : undefined
           }
           busy={busy}
+          {...(dialog?.mode === "add" || dialog?.mode === "edit"
+            ? { "aria-describedby": undefined }
+            : {})}
           onCloseAutoFocus={(event) => {
             event.preventDefault();
             const target = opener.current?.isConnected
@@ -721,19 +724,17 @@ export function Library() {
                   ? "Delete game?"
                   : selected?.title || "Game details"}
           </DialogTitle>
-          <DialogDescription
-            className={
-              dialog?.mode === "detail" ? "sr-only" : "dialog-description"
-            }
-          >
-            {dialog?.mode === "add"
-              ? "Enter the game details."
-              : dialog?.mode === "edit"
-                ? "Update the game details."
-                : dialog?.mode === "delete"
-                  ? `Remove ${selected?.title} from your library? This cannot be undone.`
-                  : "Your notes, progress and game details."}
-          </DialogDescription>
+          {(dialog?.mode === "detail" || dialog?.mode === "delete") && (
+            <DialogDescription
+              className={
+                dialog?.mode === "detail" ? "sr-only" : "dialog-description"
+              }
+            >
+              {dialog?.mode === "delete"
+                ? `Remove ${selected?.title} from your library? This cannot be undone.`
+                : "Your notes, progress and game details."}
+            </DialogDescription>
+          )}
           {dialogError && (
             <p role="alert" className="error-message">
               {dialogError}
