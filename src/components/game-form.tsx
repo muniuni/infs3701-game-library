@@ -13,11 +13,15 @@ import { TokenInput } from "./token-input";
 import { Star, Upload } from "lucide-react";
 export function GameForm({
   game,
+  platforms = [],
+  tags = [],
   busy,
   onSave,
   onCancel,
 }: {
   game?: Game;
+  platforms?: string[];
+  tags?: string[];
   busy: boolean;
   onSave: (input: UpdateGameInput, image?: File) => Promise<void>;
   onCancel: () => void;
@@ -205,8 +209,17 @@ export function GameForm({
               name="platforms"
               label="Platforms"
               initial={game?.platforms}
+              suggestions={platforms}
+              disabled={busy}
+              chips
             />
-            <TokenInput name="tags" label="Tags" initial={game?.tags} />
+            <TokenInput
+              name="tags"
+              label="Tags"
+              initial={game?.tags}
+              suggestions={tags}
+              disabled={busy}
+            />
           </div>
           <div className="form-pair">
             <label>

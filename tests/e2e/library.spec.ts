@@ -125,6 +125,7 @@ test("create, edit, search, all views, drag, rollback, confirmation and mobile l
   await page.getByRole("button", { name: "Delete", exact: true }).click();
   await page.getByRole("button", { name: "Delete game", exact: true }).click();
   await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(page.getByRole("status")).toHaveText("UI fixture deleted.");
   await expect(
     page.getByRole("heading", { name: "No games found" }),
   ).toBeVisible();
@@ -226,7 +227,7 @@ test("sidebar filters, token entry and cover preview", async ({
       .getByLabel("Title", { exact: false })
       .last()
       .fill("Refinement token fixture");
-    const platforms = page.getByRole("textbox", {
+    const platforms = page.getByRole("combobox", {
       name: "Platforms",
       exact: true,
     });
@@ -577,4 +578,133 @@ test("uploaded cover preview, save, unchanged edit, replacement and failed-save 
   ).toBeVisible();
   expect((await request.get(game.cover.url)).status()).toBe(404);
   await request.delete(`/api/games/${game.id}`);
+});
+
+test("label suggestions, visible feedback and quick status changes", async ({
+  page,
+  request,
+}) => {
+  const seed = await (
+    await request.post("/api/games", {
+      data: {
+        title: "Suggestion source",
+        platforms: ["PC", "Switch"],
+        tags: ["Cooperative", "Cozy", "Puzzle"],
+      },
+    })
+  ).json();
+  let createdId: string | undefined;
+  const title = "Suggested game";
+  try {
+    await page.goto("/");
+    await page
+      .locator("header")
+      .getByRole("button", { name: "Add Game", exact: true })
+      .click();
+    await page.getByRole("textbox", { name: "Title", exact: true }).fill(title);
+    await page
+      .getByRole("group", { name: "Suggested platforms" })
+      .getByRole("button", { name: "PC", exact: true })
+      .click();
+    await expect(
+      page.getByRole("button", { name: "Remove PC from platforms" }),
+    ).toBeVisible();
+    const platforms = page.getByRole("combobox", {
+      name: "Platforms",
+      exact: true,
+    });
+    await platforms.fill("Steam Deck");
+    await platforms.press("Enter");
+    const tags = page.getByRole("combobox", { name: "Tags", exact: true });
+    await tags.fill("co");
+    await tags.press("ArrowDown");
+    await expect(
+      page.getByRole("option", { name: "Cooperative", exact: true }),
+    ).toHaveAttribute("aria-selected", "true");
+    await tags.press("ArrowDown");
+    await expect(
+      page.getByRole("option", { name: "Cozy", exact: true }),
+    ).toHaveAttribute("aria-selected", "true");
+    await tags.press("ArrowUp");
+    await tags.press("Enter");
+    await expect(
+      page.getByRole("button", { name: "Remove Cooperative from tags" }),
+    ).toBeVisible();
+    await tags.fill("pu");
+    await tags.press("Escape");
+    await expect(
+      page.getByRole("listbox", { name: "Suggested tags" }),
+    ).toHaveCount(0);
+    await expect(page.getByRole("dialog")).toBeVisible();
+    await tags.fill("co");
+    await page.getByRole("option", { name: "Cozy", exact: true }).click();
+    await tags.fill("cooperative");
+    await tags.press("Enter");
+    await expect(
+      page.getByRole("button", { name: "Remove Cooperative from tags" }),
+    ).toHaveCount(1);
+    await tags.fill("pu");
+    await page.screenshot({ path: "test-results/tag-suggestions.png" });
+    await page.getByRole("option", { name: "Puzzle", exact: true }).click();
+    await page
+      .getByRole("button", { name: "Create game", exact: true })
+      .click();
+    await expect(page.getByRole("status")).toHaveText(`${title} saved.`);
+    const created = (await (await request.get("/api/games")).json()).find(
+      (game: { title: string }) => game.title === title,
+    );
+    createdId = created.id;
+    expect(created.platforms).toEqual(["PC", "Steam Deck"]);
+    expect(created.tags).toEqual(["Cooperative", "Cozy", "Puzzle"]);
+    await page.getByRole("button", { name: "Close", exact: true }).click();
+    await page.getByRole("textbox", { name: "Search titles" }).fill(title);
+    const status = page.getByRole("combobox", {
+      name: `Change ${title} status`,
+      exact: true,
+    });
+    await status.click();
+    await page.getByRole("option", { name: "Playing", exact: true }).click();
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await expect(page.getByRole("status")).toHaveText(
+      `${title} moved to Playing.`,
+    );
+    expect(
+      (await (await request.get(`/api/games/${createdId}`)).json()).status,
+    ).toBe("Playing");
+    await page.getByRole("button", { name: "List", exact: true }).click();
+    await status.click();
+    await page.getByRole("option", { name: "Completed", exact: true }).click();
+    await expect(page.getByRole("status")).toHaveText(
+      `${title} moved to Completed.`,
+    );
+    await page.route("**/api/games/*", (route) =>
+      route.request().method() === "PATCH"
+        ? route.fulfill({ status: 500, json: { error: "Try again." } })
+        : route.continue(),
+    );
+    await status.click();
+    await page.getByRole("option", { name: "Backlog", exact: true }).click();
+    await expect(status).toHaveText("Completed");
+    await expect(page.locator(".error-message[role=alert]")).toContainText(
+      "previous status has been restored",
+    );
+    await page.unroute("**/api/games/*");
+    await page
+      .getByRole("button", { name: `Open ${title}`, exact: true })
+      .click();
+    await status.click();
+    await page.getByRole("option", { name: "Dropped", exact: true }).click();
+    await expect(page.getByRole("status")).toHaveText(
+      `${title} moved to Dropped.`,
+    );
+    await page.screenshot({ path: "test-results/refined-details.png" });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.screenshot({ path: "test-results/refined-details-mobile.png" });
+    await page.getByRole("button", { name: "Edit", exact: true }).click();
+    await page.getByRole("combobox", { name: "Tags", exact: true }).fill("p");
+    await page.screenshot({ path: "test-results/refined-chips-mobile.png" });
+  } finally {
+    await request.delete(`/api/games/${seed.id}`);
+    if (createdId) await request.delete(`/api/games/${createdId}`);
+  }
 });

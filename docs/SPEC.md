@@ -30,7 +30,7 @@ Grid, List and five-column Kanban share browser-side search, filters and sorting
 
 Default sort is recently added. Title sorts alphabetically; dates/timestamps sort newest first, rating/playtime highest first. Unset values come last, with title as the tiebreaker. View/search/filter settings reset on page reload.
 
-Add, details, edit and confirmed delete use dialogs. Successful saves open details. Kanban supports dragging and a status selector, applies changes immediately and rolls back on failure. Loading, empty, no-match, saving and error states include appropriate reload/reset actions.
+Add, details, edit and confirmed delete use dialogs. Platform chips and tag autocomplete suggest existing library values while allowing custom entries. Successful saves open details. Grid, List, Kanban and Details offer quick status changes; Kanban also supports dragging. Status changes apply immediately and roll back on failure. Save, delete and status changes show brief success feedback. Loading, empty, no-match, saving and error states include appropriate reload/reset actions.
 
 ## Covers and storage
 

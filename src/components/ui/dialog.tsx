@@ -18,7 +18,12 @@ export function DialogContent({
       <DialogPrimitive.Content
         className={cn("dialog-content", className)}
         onEscapeKeyDown={(event) => {
-          if (busy) event.preventDefault();
+          const target = event.target;
+          const suggestionOpen =
+            target instanceof HTMLInputElement &&
+            target.getAttribute("role") === "combobox" &&
+            target.getAttribute("aria-expanded") === "true";
+          if (busy || suggestionOpen) event.preventDefault();
         }}
         onInteractOutside={(event) => {
           if (busy) event.preventDefault();

@@ -1,6 +1,8 @@
 "use client";
+import { createPortal } from "react-dom";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  Check,
   Columns3,
   Clock3,
   Pencil,
@@ -56,7 +58,12 @@ export function Library() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [dialogError, setDialogError] = useState("");
-  const [notice, setNotice] = useState("");
+  const [notice, setNotice] = useState<{ message: string } | null>(null);
+  useEffect(() => {
+    if (!notice) return;
+    const timer = window.setTimeout(() => setNotice(null), 5000);
+    return () => window.clearTimeout(timer);
+  }, [notice]);
   const [view, setView] = useState<Mode>("grid");
   const [filters, setFilters] = useState<Filters>(initialFilters);
   const [dialog, setDialog] = useState<OpenDialog>(null);
@@ -133,7 +140,7 @@ export function Library() {
           : [...previous, game],
       );
       setDialog({ mode: "detail", id: game.id });
-      setNotice("Game saved.");
+      setNotice({ message: `${game.title} saved.` });
     } catch (err) {
       setDialogError((err as Error).message);
     } finally {
@@ -152,7 +159,7 @@ export function Library() {
         previous.filter((game) => game.id !== selected.id),
       );
       setDialog(null);
-      setNotice("Game deleted.");
+      setNotice({ message: `${selected.title} deleted.` });
     } catch (err) {
       setDialogError((err as Error).message);
     } finally {
@@ -168,6 +175,8 @@ export function Library() {
     actionLock.current = true;
     setBusy(true);
     setError("");
+    setDialogError("");
+    setNotice(null);
     setGames((items) =>
       items.map((game) => (game.id === id ? { ...game, status } : game)),
     );
@@ -179,14 +188,14 @@ export function Library() {
       setGames((items) =>
         items.map((game) => (game.id === id ? updated : game)),
       );
-      setNotice(`${updated.title} moved to ${status}.`);
+      setNotice({ message: `${updated.title} moved to ${status}.` });
     } catch (err) {
       setGames((items) =>
         items.map((game) => (game.id === id ? previous : game)),
       );
-      setError(
-        `${(err as Error).message} The previous status has been restored.`,
-      );
+      const message = `${(err as Error).message} The previous status has been restored.`;
+      if (dialog?.mode === "detail") setDialogError(message);
+      else setError(message);
     } finally {
       actionLock.current = false;
       setBusy(false);
@@ -449,9 +458,6 @@ export function Library() {
                 ))}
             </div>
           )}
-          <p role="status" className="sr-only">
-            {notice}
-          </p>
           {error && (
             <div role="alert" className="error-message">
               {error}{" "}
@@ -496,29 +502,45 @@ export function Library() {
           ) : view === "grid" ? (
             <div className="game-grid">
               {visible.map((game) => (
-                <button
-                  className="game-card"
-                  key={game.id}
-                  onClick={() => open({ mode: "detail", id: game.id })}
-                >
-                  <div className="card-cover">
-                    <GameCover cover={game.cover} title={game.title} />
-                    <span className="status-chip">{game.status}</span>
-                  </div>
-                  <div className="card-info">
-                    <h2>{game.title}</h2>
-                    <div className="card-meta">
-                      <span>{game.platforms.join(" · ") || "No platform"}</span>
-                      {game.rating !== undefined && (
-                        <span className="rating">
-                          <Star size={13} />
-                          {game.rating}
-                          <small>/10</small>
-                        </span>
-                      )}
+                <article className="game-card" key={game.id}>
+                  <button
+                    className="game-card-open"
+                    onClick={() => open({ mode: "detail", id: game.id })}
+                  >
+                    <div className="card-cover">
+                      <GameCover cover={game.cover} title={game.title} />
                     </div>
+                    <div className="card-info">
+                      <h2>{game.title}</h2>
+                      <div className="card-meta">
+                        <span>
+                          {game.platforms.join(" · ") || "No platform"}
+                        </span>
+                        {game.rating !== undefined && (
+                          <span className="rating">
+                            <Star size={13} />
+                            {game.rating}
+                            <small>/10</small>
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </button>
+                  <div className="card-quick-status">
+                    <Select
+                      label={`Change ${game.title} status`}
+                      value={game.status}
+                      disabled={busy}
+                      onValueChange={(value) =>
+                        void move(game.id, value as GameStatus)
+                      }
+                      options={statuses.map((status) => ({
+                        value: status,
+                        label: status,
+                      }))}
+                    />
                   </div>
-                </button>
+                </article>
               ))}
             </div>
           ) : view === "list" ? (
@@ -533,11 +555,12 @@ export function Library() {
                 <span className="list-date">Released</span>
               </div>
               {visible.map((game) => (
-                <button
-                  className="list-row"
-                  key={game.id}
-                  onClick={() => open({ mode: "detail", id: game.id })}
-                >
+                <div className="list-row" key={game.id}>
+                  <button
+                    className="list-open"
+                    aria-label={`Open ${game.title}`}
+                    onClick={() => open({ mode: "detail", id: game.id })}
+                  />
                   <div className="list-cover">
                     <GameCover cover={game.cover} title={game.title} />
                   </div>
@@ -557,7 +580,20 @@ export function Library() {
                       <span className="muted">+{game.tags.length - 2}</span>
                     )}
                   </span>
-                  <span className="list-status status-chip">{game.status}</span>
+                  <div className="list-status quick-status">
+                    <Select
+                      label={`Change ${game.title} status`}
+                      value={game.status}
+                      disabled={busy}
+                      onValueChange={(value) =>
+                        void move(game.id, value as GameStatus)
+                      }
+                      options={statuses.map((status) => ({
+                        value: status,
+                        label: status,
+                      }))}
+                    />
+                  </div>
                   <span className="list-rating rating">
                     {game.rating === undefined ? (
                       <span className="muted">Unrated</span>
@@ -575,7 +611,7 @@ export function Library() {
                   <span className="list-date muted">
                     {game.releaseDate || "Not set"}
                   </span>
-                </button>
+                </div>
               ))}
             </div>
           ) : (
@@ -744,6 +780,8 @@ export function Library() {
             <GameForm
               key={dialog.mode === "add" ? "new" : selected?.id}
               game={selected}
+              platforms={platforms}
+              tags={tags}
               busy={busy}
               onSave={save}
               onCancel={() => {
@@ -761,21 +799,22 @@ export function Library() {
                   <GameCover cover={selected.cover} title={selected.title} />
                 </div>
                 <div className="detail-metadata">
-                  <p className="detail-platforms">
-                    {selected.platforms.join(" · ") || "No platforms set"}
-                  </p>
-                  <div className="tags">
-                    {selected.tags.map((tag) => (
-                      <span className="tag" key={tag}>
-                        {tag}
-                      </span>
-                    ))}
-                  </div>
-                  <dl>
+                  <dl className="detail-primary">
                     <div>
                       <dt>Status</dt>
                       <dd>
-                        <span className="detail-status">{selected.status}</span>
+                        <Select
+                          label={`Change ${selected.title} status`}
+                          value={selected.status}
+                          disabled={busy}
+                          onValueChange={(value) =>
+                            void move(selected.id, value as GameStatus)
+                          }
+                          options={statuses.map((status) => ({
+                            value: status,
+                            label: status,
+                          }))}
+                        />
                       </dd>
                     </div>
                     <div className="detail-rating">
@@ -815,18 +854,45 @@ export function Library() {
                         </span>
                       </dd>
                     </div>
+                  </dl>
+                  <p className="detail-platforms">
+                    {selected.platforms.join(" · ") || "No platforms set"}
+                  </p>
+                  <div className="tags">
+                    {selected.tags.map((tag) => (
+                      <span className="tag" key={tag}>
+                        {tag}
+                      </span>
+                    ))}
+                  </div>
+                  <dl className="detail-secondary">
                     <div>
                       <dt>Playtime</dt>
-                      <dd>{formatPlaytime(selected.playtimeMinutes)}</dd>
+                      <dd
+                        className={
+                          selected.playtimeMinutes === undefined
+                            ? "muted"
+                            : undefined
+                        }
+                      >
+                        {formatPlaytime(selected.playtimeMinutes)}
+                      </dd>
                     </div>
                     <div>
                       <dt>Release date</dt>
-                      <dd>{selected.releaseDate || "Not set"}</dd>
+                      <dd
+                        className={!selected.releaseDate ? "muted" : undefined}
+                      >
+                        {selected.releaseDate || "Not set"}
+                      </dd>
                     </div>
                   </dl>
                 </div>
               </div>
-              <section className="detail-review" aria-label="Review">
+              <section
+                className={`detail-review${!selected.review ? " is-empty" : ""}`}
+                aria-label="Review"
+              >
                 <h3>Review</h3>
                 <p
                   className={`review ${!selected.review ? "review-empty" : ""}`}
@@ -881,6 +947,19 @@ export function Library() {
           )}
         </DialogContent>
       </Dialog>
+      {notice &&
+        createPortal(
+          <div
+            className="success-notice"
+            role="status"
+            aria-live="polite"
+            aria-atomic="true"
+          >
+            <Check size={16} aria-hidden="true" />
+            {notice.message}
+          </div>,
+          document.body,
+        )}
     </main>
   );
 }
