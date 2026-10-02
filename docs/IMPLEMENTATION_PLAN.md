@@ -1,62 +1,47 @@
 # Implementation status and remaining plan
 
-Phases 1–7 are complete. Phase 8 application code and deployment configuration are implemented; EC2/AWS deployment and owner validation remain pending. External metadata remains future work.
+## Status
 
-## Completed phases
+| Phase                     | Status                                                                                                   |
+| ------------------------- | -------------------------------------------------------------------------------------------------------- |
+| 1–6. Initial application  | Complete: scaffold, validated CRUD, Grid/List/Kanban, dialogs, filters and responsive/accessibility work |
+| 7. EC2 deployment         | Complete, owner-confirmed for the initial application                                                    |
+| 8. Persistent storage     | Application code and deployment templates implemented; cloud deployment/validation pending               |
+| 9. Metadata autofill      | Optional, not implemented                                                                                |
+| 10. Assignment extensions | Not selected or implemented                                                                              |
 
-| Phase                    | Status                 | Delivered                                                                                                                  |
-| ------------------------ | ---------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| 1. Scaffold              | Done                   | Next.js/TypeScript, Tailwind, local shadcn/ui components, bundled fonts, dark tokens and Zod schemas                       |
-| 2. In-memory backend     | Done                   | Repository interface, shared in-memory store, development seeds, validated CRUD routes and duplicate-title checks          |
-| 3. Core UI               | Done                   | Grid/List/Kanban, title search, combined filters, sorting and empty states                                                 |
-| 4. Game dialogs          | Done for initial scope | Add/detail/edit, delete confirmation, placeholder/URL covers and disabled upload option                                    |
-| 5. Kanban behavior       | Done                   | Drag-and-drop, keyboard/touch status selector, PATCH updates and rollback on failure                                       |
-| 6. Responsive and polish | Done for initial scope | Responsive views/dialogs, focus handling, loading/error/confirmation states and browser checks                             |
-| 7. EC2 deployment        | Done                   | Initial application deployed to Amazon Linux 2023, as confirmed by the project owner; production build reported successful |
+The active repository uses Prisma/SQLite; new databases start empty and survive process restarts. The original in-memory implementation remains a test double.
 
-Phase 7 completion is owner-reported. The EC2 checkout is `/home/ec2-user/infs3701-game-library`. Host service/proxy configurations and deployment screenshots are not versioned here; retain assignment evidence separately. No live EC2 audit was performed for this documentation update.
+## Phase 8 delivered
 
-The active repository now uses Prisma/SQLite. New databases start empty and retain records across application restarts. The original in-memory repository remains available for unit tests.
+- Prisma schema/migration, `SqliteGameRepository`, database-enforced normalized-title uniqueness and preserved field validation/clearing.
+- Local SQLite at `data/game-library.sqlite` and uploaded covers at `data/covers/`, without AWS. EBS mode requires `/mnt/game-library-data/game-library.sqlite` and its separate mounted filesystem/UUID; covers use private S3 through IAM.
+- Multipart saves, validated JPEG/PNG/WebP images up to 5 MiB and 40 megapixels, application image delivery, preview and failed-save retry.
+- Transactional cover references and a durable cleanup ledger. Mutations attempt retired-object deletion; `npm run covers:cleanup` retries failed deletes and pending uploads older than 24 hours.
+- PM2 configuration, mount dependency, IAM policies, cleanup service/timer and [deployment guide](../deploy/README.md). These are templates to apply, not verified live infrastructure. Local mode has no automatic cleanup timer.
 
-## Phase 8. Implemented locally, awaiting owner validation
+No migration of previous in-memory records is required. EBS snapshot instructions cover the database, not historical S3 image contents.
 
-### Phase 8 decisions
+## Verification
 
-- Local mode stores uploaded images in `data/covers/` without AWS. EBS mode uses private S3 uploads and delivery go through Next.js, using IAM and bucket `infs3701-game-library-images` in `us-east-1`.
-- Accept JPEG, PNG and WebP up to 5 MiB. Decode/validate still images up to 40 megapixels. Delete replaced/deleted uploads after committing the game mutation.
-- Require the separate EBS filesystem at `/mnt/game-library-data`; store SQLite at `/mnt/game-library-data/game-library.sqlite`.
-- Back up SQLite with EBS snapshots. Existing in-memory records do not need migration. Snapshotting EBS does not back up S3 image contents.
+Last recorded run, 2026-10-02: 12 unit/integration tests and 5 Chromium E2E tests passed, along with lint, typecheck and production build. This documentation review did not rerun them.
 
-### Delivered
+| Command                                              | Coverage                                                                                                                                                                                         |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `npm test`                                           | Domain/query behavior, SQLite persistence and uniqueness, optional clearing, local cover persistence/cleanup, storage failure recovery, image validation, request limits and EBS guard rejection |
+| `npm run test:e2e`                                   | CRUD, views, drag/rollback, filters/tokens, mobile layout and cover preview/save/delivery/retry/replacement                                                                                      |
+| `npm run lint`, `npm run typecheck`, `npm run build` | Static checks and production compilation                                                                                                                                                         |
 
-1. Prisma schema and versioned migration, `SqliteGameRepository`, database-enforced normalized-title uniqueness, preserved CRUD/validation semantics and safe-integer playtime.
-2. Lazy server repository, local database setup, explicit production EBS path/UUID checks, PM2 configuration and mount dependency template.
-3. Multipart save and image delivery endpoints, bounded requests, content validation, S3 IAM access and durable cleanup ledger. A timer retries failed deletes and expired pending uploads without browser traffic.
-4. Upload control, preview, pending/error/retry behavior, preserved uploaded covers on unrelated edits, and removal of obsolete in-memory notices.
-5. IAM policies, cleanup service/timer and [owner deployment/validation guide](../deploy/README.md).
+Build before E2E. The suite uses temporary SQLite and local cover files, with no AWS access; default port 3101 can be overridden with `PLAYWRIGHT_PORT`.
 
-### Local verification
+## Phase 8 remaining
 
-- `npm test`: existing query/validation tests plus real SQLite CRUD, reopening and a fresh Node.js process, normalized uniqueness, optional clearing, image replacement/deletion, ambiguous PUT recovery, failed-delete retry, local filesystem persistence and cleanup, image byte/type/size checks, stream limits and missing-EBS configuration rejection.
-- `npm run test:e2e`: isolated temporary SQLite and local cover files, with no real AWS access. Existing CRUD/view/drag/filter/mobile flows plus uploaded-cover preview, delivery, unchanged edit, replacement and failed-save retry. Build first; default port 3101, override with `PLAYWRIGHT_PORT`.
-- `npm run lint`, `npm run typecheck`, `npm run build`, migration deployment and dependency audit.
+The owner performs live validation. Follow the deployment guide to mount EBS, configure private S3/IAM and Nginx, deploy migrations/app, install the cleanup timer and configure snapshot backups. Verify CRUD, application restart, EC2 reboot, missing-mount refusal, upload limits, image delivery/replacement/deletion, failed-delete retry, anonymous S3 denial and snapshot restoration. Mark Phase 8 complete only after recording those results.
 
-Verified on 2026-09-30: all 9 unit/integration tests and 5 Chromium E2E tests passed, as did lint, typecheck, migration deployment, production build and `git diff --check`. Dependency audit reported zero vulnerabilities. These checks do not prove EC2 mounting, IAM permissions or real S3 behavior.
+The owner reports the separate EBS volume is attached and the bucket is created. Mounting, permissions, service configuration and backups have not been verified here.
 
-Local cover storage updated on 2026-10-02. All 12 unit/integration tests and 5 Chromium E2E tests passed, along with lint, typecheck and production build. Local upload/display/cleanup verification uses filesystem covers in temporary directories and requires no AWS connection.
+## Later phases
 
-### Owner validation required before completion
+Phase 9 may add server-side RAWG search with an import preview; imported values must stay editable and manual entry must work when RAWG fails. The reserved `api` cover type is not accepted yet.
 
-The owner requested to perform live validation. Stop before EC2/AWS changes. Follow [the deployment guide](../deploy/README.md) to mount the attached EBS volume, configure IAM/private S3 and Nginx, deploy migrations and the app, install the cleanup timer, and configure EBS snapshot backups. Record CRUD, application restart, EC2 reboot, missing-mount refusal, upload limits, image delivery/cleanup, anonymous S3 denial and snapshot restore evidence. Phase 8 is not marked complete until those checks pass.
-
-## Phase 9. Metadata autofill: optional, not implemented
-
-1. Add server-side RAWG search and a match preview in Add/Edit.
-2. Import selected metadata and cover URLs while keeping every value editable.
-3. Preserve manual entry when RAWG is unavailable.
-
-The current `Cover` type reserves `api`, but validation does not yet accept it.
-
-## Phase 10. Assignment extensions: planned, not selected
-
-Review Weeks 1–4 material, then select three justified Going Beyond topics. Implement only those that solve a concrete service concern and record their rationale, configuration and evidence.
+For Phase 10, review Weeks 1–4 course material, select three justified Going Beyond extensions and record their rationale and evidence. None has been selected.

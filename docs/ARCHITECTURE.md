@@ -1,82 +1,54 @@
 # Architecture
 
-## Implemented stack and deployment
+## Stack and code boundaries
 
-Next.js 16 App Router, React 19, TypeScript, Tailwind CSS 4, locally styled shadcn/ui Button/Dialog components using Radix, and Zod validation. Fonts are bundled through Fontsource.
+Next.js 16 App Router, React 19, TypeScript, Tailwind CSS 4, Radix-based local UI components, Zod, Prisma with the better-sqlite3 adapter, Sharp and AWS SDK v3. Fonts are bundled through Fontsource. Node.js 20.19+, 22.12+ or 24+ is supported; EC2 uses Node.js 24.
 
-**Phase 7 EC2 deployment is complete**, as confirmed by the project owner. The deployment environment is Amazon Linux 2023; the repository path on EC2 is `/home/ec2-user/infs3701-game-library`. The production build was reported successful.
+| Location                                             | Responsibility                                                               |
+| ---------------------------------------------------- | ---------------------------------------------------------------------------- |
+| `src/app/page.tsx`, `src/components/`                | Library views, dialogs and forms                                             |
+| `src/lib/game.ts`, `library-query.ts`                | Domain validation and browser-side queries                                   |
+| `src/app/api/`                                       | Dynamic Node.js CRUD and cover delivery routes                               |
+| `src/lib/server-repository.ts`, `database.ts`        | Lazy process-wide repository and guarded database connection                 |
+| `src/lib/sqlite-game-repository.ts`                  | Prisma CRUD, title uniqueness and cover cleanup ledger                       |
+| `src/lib/server-cover-storage.ts`                    | Local/EBS backend selection                                                  |
+| `src/lib/local-cover-storage.ts`, `cover-storage.ts` | Filesystem/S3 objects and image validation                                   |
+| `src/lib/mutation-body.ts`                           | Bounded JSON/multipart parsing                                               |
+| `prisma/`, `scripts/`, `deploy/`                     | Schema/migration, startup/migration guards, cleanup and deployment templates |
 
-The diagram describes the Phase 8 code/configuration awaiting deployment, not a live EC2 audit.
+`GameRepository` exposes list/get/create/update/delete. The active implementation stores validated game JSON plus unique normalized-title and optional cover keys. JSON preserves safe-integer playtime. `CoverObject` tracks pending, attached and garbage objects. The in-memory repository remains a test double; fixtures are not automatically seeded.
 
-```text
-Browser
-  ↓ HTTP
-Nginx :80
-  ↓
-Next.js :3000
-  ↓
-SqliteGameRepository → Prisma → SQLite on EBS
-  ↓ uploaded covers
-Private S3 (through IAM)
+## Storage selection and lifecycle
 
-PM2 manages the Next.js process.
-```
+`STORAGE_MODE` overrides the default: local outside production, EBS in production. Local defaults are `data/game-library.sqlite` and `data/covers/`; `DATABASE_URL` requires an absolute `file:` path, and `LOCAL_COVERS_DIR` overrides the image directory. Cover files use UUID names and `.jpg`, `.png` or `.webp` extensions. Local mode does not instantiate S3 or require AWS credentials.
 
-The deployment uses Nginx on port 80 as a reverse proxy and PM2 to run
-and monitor one Next.js process on `127.0.0.1:3000` with Node.js 24.
+EBS mode requires `/mnt/game-library-data/game-library.sqlite`, Linux, `EBS_VOLUME_UUID`, an exact filesystem mount and a device distinct from the root filesystem. These checks run before opening SQLite or applying migrations. Database journals remain beside the database. S3 defaults to `infs3701-game-library-images` in `us-east-1`; `S3_BUCKET` and `AWS_REGION` can override them. The SDK uses its credential chain; EC2 configuration calls for an instance role.
 
-The supplied `ecosystem.config.cjs` configures Phase 8 for PM2. The owner must apply its mount dependency and verify restoration after reboot.
+An upload ledger entry is created before writing the object. A database transaction attaches the new cover and retires the previous one. Failed saves attempt object cleanup; ambiguous write failures retain a pending entry for later cleanup. Committed edits are not rolled back when deletion fails.
 
-The repository's `npm start` command itself runs `next start --hostname 0.0.0.0` (default port 3000). `npm run build` uses webpack. Supported Node.js versions are 20.19+, 22.12+ or 24+; deployment uses Node.js 24. `npm start` checks the configured filesystem before starting Next.js.
+Mutations attempt deletion of their own retired objects. `npm run covers:cleanup` processes up to 100 garbage objects and retires pending uploads older than 24 hours. Local cleanup is manual. The supplied production timer runs two minutes after boot and five minutes after the previous run ends; it must be installed with the service template.
 
-## Implemented code boundaries
+## API
 
-| Location                                                    | Responsibility                                                                |
-| ----------------------------------------------------------- | ----------------------------------------------------------------------------- |
-| `src/app/page.tsx`, `src/components/`                       | Client library, views, forms and dialogs                                      |
-| `src/lib/game.ts`                                           | Domain types, shared create/update schemas and playtime formatting            |
-| `src/lib/library-query.ts`                                  | Browser-side search, filters and sorting                                      |
-| `src/app/api/games/`                                        | Node.js CRUD route handlers                                                   |
-| `src/lib/repository.ts`                                     | Async `GameRepository` interface and Map-backed `InMemoryGameRepository`      |
-| `src/lib/server-repository.ts`                              | Lazy, process-wide SQLite repository and mode-selected cover storage          |
-| `src/lib/sqlite-game-repository.ts`                         | Prisma CRUD, normalized uniqueness and durable cover cleanup                  |
-| `src/lib/cover-storage.ts`, `mutation-body.ts`              | Bounded upload parsing, image decoding and S3 operations                      |
-| `src/lib/local-cover-storage.ts`, `server-cover-storage.ts` | Filesystem covers and local/EBS storage selection                             |
-| `prisma/`, `scripts/`, `deploy/`                            | Schema/migrations, filesystem guard, cleanup job and deployment configuration |
-| `src/lib/seed.ts`                                           | Six fictional development fixtures                                            |
+| Method and path         | Success                         |
+| ----------------------- | ------------------------------- |
+| `GET /api/games`        | 200, all games                  |
+| `POST /api/games`       | 201, created game               |
+| `GET /api/games/:id`    | 200, one game                   |
+| `PATCH /api/games/:id`  | 200, updated game               |
+| `DELETE /api/games/:id` | 204                             |
+| `GET /api/covers/:id`   | 200, currently referenced image |
 
-Repository operations are `listGames`, `getGame`, `createGame`, `updateGame` and `deleteGame`. Returned records are cloned to prevent callers mutating storage. The server creates IDs/timestamps, validates input and enforces normalized-title uniqueness.
+POST/PATCH accept JSON, or multipart `input` JSON plus one `cover` file. Unknown fields and empty PATCH bodies are rejected. JSON may supply placeholder/external-URL covers, but not upload references. Omitting `cover` on PATCH preserves it. JSON requests are limited to 64 KiB; multipart requests to 5 MiB plus 64 KiB, before parsing. Sharp validates and decodes image bytes before storage.
 
-The active repository stores each game as validated JSON, with a database unique normalized-title key and unique optional cover key. This preserves optional values and JavaScript safe-integer playtime without SQLite/Prisma 32-bit narrowing. `CoverObject` records pending, attached and garbage objects. Transactions attach new references and retire old references together. The in-memory implementation remains a test double. There is no persistent browser storage.
+Errors return an `error` string with 400 for invalid input, 404 for missing records/references, 409 for duplicate titles, 413 for oversized requests or 500 for unexpected/storage failures. GET responses use `no-store`; images also use `nosniff` and a restrictive CSP.
 
-## Implemented API
+React holds a fetched copy plus UI state. Create/edit use server responses, delete removes records after success, and Kanban rolls back failed optimistic changes. A browser action lock prevents overlapping mutations. There is no polling or cross-tab synchronization. External cover URLs are fetched directly by the browser.
 
-| Method and path         | Success response  |
-| ----------------------- | ----------------- |
-| `GET /api/games`        | 200, all games    |
-| `POST /api/games`       | 201, created game |
-| `GET /api/games/:id`    | 200, one game     |
-| `PATCH /api/games/:id`  | 200, updated game |
-| `DELETE /api/games/:id` | 204, no body      |
+## Deployment status
 
-Routes are dynamic; GET responses use `Cache-Control: no-store`. Errors return an `error` string with 400 for invalid JSON/input, 404 for missing records, 409 for duplicate titles, 413 for oversized uploads, or 500 for unexpected failures. Unknown input fields and empty PATCH bodies are rejected. PATCH accepts partial fields and `null` to clear optional values. POST/PATCH also accept multipart `input` JSON plus a single `cover` file. JSON cannot supply upload keys or URLs; omitting `cover` on PATCH preserves the existing cover. `GET /api/covers/:id` serves only currently referenced objects with `no-store` and `nosniff` headers.
+Phase 7 deployment is owner-confirmed on Amazon Linux 2023 at `/home/ec2-user/infs3701-game-library`. The documented environment uses Nginx on port 80 and PM2 with one Next.js process on `127.0.0.1:3000`.
 
-## Implemented client behavior
+Phase 8 supplies `ecosystem.config.cjs`, an EBS mount dependency, IAM policies and a cleanup service/timer. These templates and [deployment instructions](../deploy/README.md) are not proof of live configuration. Mounting, IAM/private S3, restart behavior and EBS snapshot restoration await owner validation; snapshots exclude S3 object contents.
 
-The server is authoritative, while React holds a fetched copy of games plus view/filter/dialog/form/drag state and loading/error state. Create/edit replace local records with server responses; delete removes a record after success. Kanban temporarily applies the new status and restores the previous record on failure. A client action lock prevents overlapping mutations in that browser.
-
-There is no polling or cross-tab synchronization. Search and sorting do not issue server queries. External cover URLs are fetched directly by the browser, with a local fallback. Uploads use the application image API. No external game metadata API is used.
-
-## Phase 8 operational boundaries
-
-`STORAGE_MODE=local` uses an absolute local database path, defaulting to `data/game-library.sqlite`, and filesystem covers at `data/covers/`. Files use generated UUID names with `.jpg`, `.png` or `.webp` extensions; the image API serves them after the game transaction commits. `LOCAL_COVERS_DIR` provides a directory override for isolated tests. The existing ledger also handles local file cleanup. Local mode does not instantiate an S3 client or require AWS credentials. Production defaults to `ebs`. EBS mode checks the exact mount, filesystem UUID and separate device before opening SQLite or running migrations. The PM2 configuration explicitly selects EBS mode; its supplied systemd drop-in also requires the mount. The database and journals reside on the same filesystem.
-
-EBS mode uses S3 `GetObject`, `PutObject` and `DeleteObject` on `covers/*`, with no public ACL. The EC2 instance profile supplies temporary credentials. Upload requests are stream-bounded before multipart parsing and decoded with Sharp before S3 access.
-
-An object is recorded before writing to the selected storage backend. A successful database transaction attaches it and queues any old object; failed writes leave recoverable ledger entries. Ambiguous PUT failures retain a pending entry for a second cleanup after 24 hours. Mutations attempt cleanup of their own retired objects; the supplied five-minute systemd timer retries the persistent backlog, up to 100 per run. Storage deletion failures do not roll back an already committed game edit. In dev, queued cleanup can be retried with `npm run covers:cleanup`; the production timer is not started automatically. Deployment must install the timer.
-
-The owner performs EC2/AWS validation. Mount and IAM configuration, private S3 reads, reboot behavior and EBS snapshot restoration are not verified locally. [Deployment instructions and configuration](../deploy/README.md) cover these steps. EBS backups contain object references but not historical S3 image contents.
-
-Phase 9 RAWG and Phase 10 assignment extensions remain unimplemented.
-
-References: [Prisma SQLite](https://docs.prisma.io/docs/prisma-orm/quickstart/sqlite), [AWS SDK S3](https://docs.aws.amazon.com/sdk-for-javascript/v3/developer-guide/javascript_s3_code_examples.html), [EC2 IAM roles](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/iam-roles-for-amazon-ec2.html), [S3 Block Public Access](https://docs.aws.amazon.com/AmazonS3/latest/userguide/access-control-block-public-access.html).
+`npm ci` generates Prisma Client. `npm run dev` applies migrations first; `npm run build` generates the client and builds with webpack. `npm start` checks storage but does not apply migrations. Local production-build testing requires `STORAGE_MODE=local`, as provided in `.env.example`.
