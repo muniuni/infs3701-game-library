@@ -1,6 +1,6 @@
-# Phase 8 deployment and owner validation
+# Phase 8 deployment runbook
 
-Local implementation is ready for validation. Nothing in this directory has been applied to EC2 or AWS. Do not mark Phase 8 complete until the checks below pass. Keep the current PM2 process name if it differs from `game-library`, and avoid running two app processes.
+Phase 8 cloud deployment and validation are complete, owner-confirmed on 2026-10-02. The procedures below are retained for maintenance, redeployment and repeat validation. Keep the current PM2 process name if it differs from `game-library`, and avoid running two app processes.
 
 ## 1. Mount the attached data volume
 
@@ -83,7 +83,7 @@ Record results, screenshots and relevant logs for these checks:
 1. Create a game with every field. Reload, edit, clear optional fields, move Kanban status, and delete another record. A duplicate title with changed case, spaces or full-width Latin letters must return 409. Concurrent duplicate requests must produce one record.
 2. Restart the app with `pm2 restart game-library`. Confirm the game and fields remain. Reboot EC2, reconnect, confirm the EBS mount, PM2 and cleanup timer, then check the same record again.
 3. Upload a JPEG, PNG and WebP. Confirm the preview before saving and image delivery after reloading. Edit only the title and confirm the same uploaded image remains. Reject files over 5 MiB, SVG, corrupt images and files whose bytes do not match their declared type. Still images are limited to 40 megapixels.
-4. Replace an upload with another upload, an external URL and a placeholder. Delete a game with an upload. Check in the S3 console that the old `covers/` objects are gone. A duplicate-title save with a new image must leave the original record/cover unchanged and remove the unused object.
+4. Replace an upload through the form; test external URL and placeholder replacements through the API, since those controls are not exposed in the UI. Delete a game with an upload. Check in the S3 console that the old `covers/` objects are gone. A duplicate-title save with a new image must leave the original record/cover unchanged and remove the unused object.
 5. Temporarily deny `s3:DeleteObject` on the test role, replace/delete a cover, then restore the permission. The game change should succeed; the old object should disappear after cleanup retries. Temporarily deny `s3:PutObject`; saving an upload should fail with the form and selected image available for retry. Restore permissions afterward.
 6. Copy a current object's key from the S3 console. From an unauthenticated client, `curl -I 'https://infs3701-game-library-images.s3.us-east-1.amazonaws.com/covers/OBJECT_ID'` must return 403. The matching `/api/covers/OBJECT_ID` application URL must return 200 and an image content type.
 
@@ -106,5 +106,3 @@ sqlite3 -readonly /mnt/game-library-restore/game-library.sqlite 'PRAGMA integrit
 Expected result is `ok` plus the saved game. Install the SQLite CLI if it is not available. Keep the snapshot and restore evidence; unmount and remove only the temporary restored volume after verification.
 
 EBS snapshots back up database records, including object references, but do not back up S3 objects. Covers deleted since an older snapshot cannot be recovered from EBS; recovering historical cover images needs a separate S3 retention/version-recovery policy. Do not claim full image recovery from this drill.
-
-Phase 8 remains awaiting owner validation until the deployment, restart, missing-mount, S3 privacy/cleanup and backup/restore checks above are recorded.

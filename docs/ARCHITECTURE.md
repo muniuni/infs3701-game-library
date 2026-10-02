@@ -26,7 +26,7 @@ EBS mode requires `/mnt/game-library-data/game-library.sqlite`, Linux, `EBS_VOLU
 
 An upload ledger entry is created before writing the object. A database transaction attaches the new cover and retires the previous one. Failed saves attempt object cleanup; ambiguous write failures retain a pending entry for later cleanup. Committed edits are not rolled back when deletion fails.
 
-Mutations attempt deletion of their own retired objects. `npm run covers:cleanup` processes up to 100 garbage objects and retires pending uploads older than 24 hours. Local cleanup is manual. The supplied production timer runs two minutes after boot and five minutes after the previous run ends; it must be installed with the service template.
+Mutations attempt deletion of their own retired objects. `npm run covers:cleanup` processes up to 100 garbage objects and retires pending uploads older than 24 hours. Local cleanup is manual. The production timer runs two minutes after boot and five minutes after the previous run ends.
 
 ## API
 
@@ -43,12 +43,12 @@ POST/PATCH accept JSON, or multipart `input` JSON plus one `cover` file. Unknown
 
 Errors return an `error` string with 400 for invalid input, 404 for missing records/references, 409 for duplicate titles, 413 for oversized requests or 500 for unexpected/storage failures. GET responses use `no-store`; images also use `nosniff` and a restrictive CSP.
 
-React holds a fetched copy plus UI state. Create/edit use server responses, delete removes records after success, and Kanban rolls back failed optimistic changes. A browser action lock prevents overlapping mutations. There is no polling or cross-tab synchronization. External cover URLs are fetched directly by the browser.
+React holds a fetched copy plus UI state. Create/edit use server responses, delete removes records after success, and quick status changes across all views roll back on failure. A browser action lock prevents overlapping mutations. There is no polling or cross-tab synchronization. External cover URLs are fetched directly by the browser.
 
 ## Deployment status
 
 Phase 7 deployment is owner-confirmed on Amazon Linux 2023 at `/home/ec2-user/infs3701-game-library`. The documented environment uses Nginx on port 80 and PM2 with one Next.js process on `127.0.0.1:3000`.
 
-Phase 8 supplies `ecosystem.config.cjs`, an EBS mount dependency, IAM policies and a cleanup service/timer. These templates and [deployment instructions](../deploy/README.md) are not proof of live configuration. Mounting, IAM/private S3, restart behavior and EBS snapshot restoration await owner validation; snapshots exclude S3 object contents.
+Phase 8 cloud deployment and validation are complete, owner-confirmed on 2026-10-02. The [deployment runbook](../deploy/README.md) and supplied PM2, EBS mount, IAM and cleanup configurations remain operational references. EBS snapshots exclude S3 object contents.
 
 `npm ci` generates Prisma Client. `npm run dev` applies migrations first; `npm run build` generates the client and builds with webpack. `npm start` checks storage but does not apply migrations. Local production-build testing requires `STORAGE_MODE=local`, as provided in `.env.example`.

@@ -2,7 +2,7 @@
 
 ## Status and scope
 
-Single-user game library with no authentication. Prisma/SQLite persistence and local/S3 cover storage are implemented. Phase 7 EC2 deployment is owner-confirmed; Phase 8 cloud deployment and validation remain pending. RAWG integration and assignment extensions are not implemented.
+Single-user game library with no authentication. Prisma/SQLite persistence and local/S3 cover storage are implemented. Phase 7 EC2 deployment and Phase 8 cloud deployment/validation are complete, owner-confirmed. RAWG integration and assignment extensions are not implemented.
 
 New databases start empty, retain records across application restarts and do not automatically load the fictional fixtures. No persistent browser storage is used.
 
@@ -47,9 +47,9 @@ Uploads are sent with the game save and displayed through `/api/covers/:id`. Unr
 
 `DATABASE_URL` can override the local database with an absolute `file:` path; `LOCAL_COVERS_DIR` overrides the local image directory. EBS mode requires the exact separate filesystem mount and configured UUID. External URL images are fetched by the browser in either mode.
 
-Retired objects are deleted immediately when possible. Failed deletions remain in SQLite for `npm run covers:cleanup`; that command also processes pending uploads older than 24 hours. Local mode has no automatic cleanup schedule. Production includes a timer template that must be installed. Bucket privacy does not restrict the unauthenticated application image API.
+Retired objects are deleted immediately when possible. Failed deletions remain in SQLite for `npm run covers:cleanup`; that command also processes pending uploads older than 24 hours. Local mode has no automatic cleanup schedule. Production cleanup uses the supplied service/timer. Bucket privacy does not restrict the unauthenticated application image API.
 
-The owner reports the EBS volume and bucket are created. Mounting, IAM, S3 privacy, reboot persistence and EBS snapshot backup/restore await [owner validation](../deploy/README.md). EBS snapshots do not contain S3 image data.
+Phase 8 completion was confirmed by the owner on 2026-10-02. See the [deployment runbook](../deploy/README.md) for setup and validation procedures. EBS snapshots do not contain S3 image data.
 
 ## Out of scope
 

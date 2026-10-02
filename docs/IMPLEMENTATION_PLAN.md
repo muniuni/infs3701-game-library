@@ -6,7 +6,7 @@
 | ------------------------- | -------------------------------------------------------------------------------------------------------- |
 | 1–6. Initial application  | Complete: scaffold, validated CRUD, Grid/List/Kanban, dialogs, filters and responsive/accessibility work |
 | 7. EC2 deployment         | Complete, owner-confirmed for the initial application                                                    |
-| 8. Persistent storage     | Application code and deployment templates implemented; cloud deployment/validation pending               |
+| 8. Persistent storage     | Complete: application code, cloud deployment and validation; owner-confirmed               |
 | 9. Metadata autofill      | Optional, not implemented                                                                                |
 | 10. Assignment extensions | Not selected or implemented                                                                              |
 
@@ -18,13 +18,13 @@ The active repository uses Prisma/SQLite; new databases start empty and survive 
 - Local SQLite at `data/game-library.sqlite` and uploaded covers at `data/covers/`, without AWS. EBS mode requires `/mnt/game-library-data/game-library.sqlite` and its separate mounted filesystem/UUID; covers use private S3 through IAM.
 - Multipart saves, validated JPEG/PNG/WebP images up to 5 MiB and 40 megapixels, application image delivery, preview and failed-save retry.
 - Transactional cover references and a durable cleanup ledger. Mutations attempt retired-object deletion; `npm run covers:cleanup` retries failed deletes and pending uploads older than 24 hours.
-- PM2 configuration, mount dependency, IAM policies, cleanup service/timer and [deployment guide](../deploy/README.md). These are templates to apply, not verified live infrastructure. Local mode has no automatic cleanup timer.
+- PM2 configuration, mount dependency, IAM policies, cleanup service/timer and [deployment guide](../deploy/README.md). Cloud deployment and validation are owner-confirmed complete. Local mode has no automatic cleanup timer.
 
 No migration of previous in-memory records is required. EBS snapshot instructions cover the database, not historical S3 image contents.
 
 ## Verification
 
-UI refinement checks on 2026-10-02 passed lint, typecheck, production build and 6 Chromium E2E tests. The suite includes preview alignment, keyboard suggestions, visible feedback and quick status save/rollback. The previously recorded 12 unit/integration tests were not rerun during this UI session or documentation review.
+UI refinement checks on 2026-10-02 passed lint, typecheck, production build and 6 Chromium E2E tests. The suite includes preview alignment, floating keyboard suggestions, floating success notifications and quick status save/rollback. The previously recorded 12 unit/integration tests were not rerun during this UI session or documentation review.
 
 | Command                                              | Coverage                                                                                                                                                                                         |
 | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -34,11 +34,9 @@ UI refinement checks on 2026-10-02 passed lint, typecheck, production build and 
 
 Build before E2E. The suite uses temporary SQLite and local cover files, with no AWS access; default port 3101 can be overridden with `PLAYWRIGHT_PORT`.
 
-## Phase 8 remaining
+## Phase 8 completion
 
-The owner performs live validation. Follow the deployment guide to mount EBS, configure private S3/IAM and Nginx, deploy migrations/app, install the cleanup timer and configure snapshot backups. Verify CRUD, application restart, EC2 reboot, missing-mount refusal, upload limits, image delivery/replacement/deletion, failed-delete retry, anonymous S3 denial and snapshot restoration. Mark Phase 8 complete only after recording those results.
-
-The owner reports the separate EBS volume is attached and the bucket is created. Mounting, permissions, service configuration and backups have not been verified here.
+Cloud deployment and validation were confirmed complete by the owner on 2026-10-02. The [deployment runbook](../deploy/README.md) remains the reference for maintenance and repeat validation. This documentation update did not rerun cloud checks.
 
 ## Later phases
 

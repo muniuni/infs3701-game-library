@@ -1,6 +1,6 @@
 # Game Library
 
-Single-user Next.js game library with Prisma/SQLite persistence and cover uploads stored locally or in private S3. Grid, List and Kanban share title search, status/platform/tag/minimum-rating filters and sorting. Add/edit/detail/delete use dialogs; Kanban supports dragging and keyboard-accessible status controls. No authentication or RAWG integration.
+Single-user Next.js game library with Prisma/SQLite persistence and cover uploads stored locally or in private S3. Grid, List and Kanban share title search, status/platform/tag/minimum-rating filters and sorting. Add/edit/detail/delete use dialogs; all views offer quick status changes, and Kanban supports dragging. No authentication or RAWG integration.
 
 ## Local setup
 
@@ -20,7 +20,7 @@ npm run build
 npm start
 ```
 
-The example `.env` sets `STORAGE_MODE=local` for local production-build testing. EC2 must use EBS mode; see [deployment and owner validation](deploy/README.md). Phase 8 code is implemented, but cloud deployment and validation are pending.
+The example `.env` sets `STORAGE_MODE=local` for local production-build testing. EC2 must use EBS mode; see the [deployment runbook](deploy/README.md). Phase 8 cloud deployment and validation are complete, owner-confirmed on 2026-10-02.
 
 ## API
 
@@ -28,7 +28,7 @@ The example `.env` sets `STORAGE_MODE=local` for local production-build testing.
 
 POST/PATCH accept JSON or multipart `input` JSON plus one `cover` file. Supported images are JPEG, PNG and WebP, up to 5 MiB and 40 megapixels, still images only. The server owns uploaded references. Omitting `cover` on PATCH preserves it; placeholder/URL replacements retire the previous object. Optional fields clear with `null`; duplicate normalized titles return 409. Invalid input returns 400 and oversized requests return 413.
 
-Game mutations and a durable cover ledger are stored together in SQLite. Failed S3 deletions retry with `npm run covers:cleanup`; production must install the supplied timer. EBS snapshots back up SQLite, not S3 object contents.
+Game mutations and a durable cover ledger are stored together in SQLite. Failed S3 deletions retry with `npm run covers:cleanup`; production uses the supplied cleanup timer. EBS snapshots back up SQLite, not S3 object contents.
 
 ## Verification
 
