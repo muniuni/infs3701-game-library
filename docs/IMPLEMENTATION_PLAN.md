@@ -24,12 +24,12 @@ No migration of previous in-memory records is required. EBS snapshot instruction
 
 ## Verification
 
-Last recorded run, 2026-10-02: 12 unit/integration tests and 5 Chromium E2E tests passed, along with lint, typecheck and production build. This documentation review did not rerun them.
+UI refinement checks on 2026-10-02 passed lint, typecheck, production build and 5 Chromium E2E tests. The final layout changes were rechecked with the build and E2E suite, including preview ratio/alignment. The previously recorded 12 unit/integration tests were not rerun during this UI session or documentation review.
 
 | Command                                              | Coverage                                                                                                                                                                                         |
 | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `npm test`                                           | Domain/query behavior, SQLite persistence and uniqueness, optional clearing, local cover persistence/cleanup, storage failure recovery, image validation, request limits and EBS guard rejection |
-| `npm run test:e2e`                                   | CRUD, views, drag/rollback, filters/tokens, mobile layout and cover preview/save/delivery/retry/replacement                                                                                      |
+| `npm run test:e2e`                                   | CRUD, views, drag/rollback, filters/tokens, responsive forms, 4:3 preview alignment and cover upload/save/delivery/retry/replacement/cancellation                                                                                      |
 | `npm run lint`, `npm run typecheck`, `npm run build` | Static checks and production compilation                                                                                                                                                         |
 
 Build before E2E. The suite uses temporary SQLite and local cover files, with no AWS access; default port 3101 can be overridden with `PLAYWRIGHT_PORT`.

@@ -34,7 +34,9 @@ Add, details, edit and confirmed delete use dialogs. Successful saves open detai
 
 ## Covers and storage
 
-Placeholder and external URLs remain available; failed images fall back to the placeholder. Uploads accept still JPEG, PNG and WebP images up to 5 MiB and 40 megapixels. The server checks the declared format against decoded bytes, re-encodes without metadata and also limits the stored result to 5 MiB.
+Create/edit forms offer file upload and replacement through the cover preview, with no URL-entry or cover-removal controls. New games without an upload use the placeholder; edits without a new upload preserve the existing cover. The API still accepts external URLs, and existing URL covers remain displayable. Failed images fall back to the placeholder.
+
+Uploads accept still JPEG, PNG and WebP images up to 5 MiB and 40 megapixels. The server checks the declared format against decoded bytes, re-encodes without metadata and also limits the stored result to 5 MiB.
 
 Uploads are sent with the game save and displayed through `/api/covers/:id`. Unrelated edits preserve the image; replacement or game deletion retires the old object after the database commit. Failed saves retain the form/image for retry. Cancelling before save uploads nothing.
 
