@@ -57,9 +57,6 @@ export class S3CoverStorage implements CoverStorage {
   private client = new S3Client({
     region: process.env.AWS_REGION || "us-east-1",
     maxAttempts: 3,
-    ...(process.env.STORAGE_MODE === "local" && process.env.S3_ENDPOINT
-      ? { endpoint: process.env.S3_ENDPOINT, forcePathStyle: true }
-      : {}),
   });
   private bucket = process.env.S3_BUCKET || "infs3701-game-library-images";
   async put(key: string, image: ImageUpload) {

@@ -56,7 +56,7 @@ export class SqliteGameRepository implements GameRepository {
       if (id && !(await this.getGame(id))) return undefined;
       if (image) {
         key = `covers/${randomUUID()}`;
-        // Register before S3: even a crash or ambiguous PUT outcome is recoverable.
+        // Register before writing: crashes and ambiguous storage outcomes are recoverable.
         await this.db.coverObject.create({ data: { key, state: "pending" } });
         await this.storage.put(key, image);
         putCompleted = true;

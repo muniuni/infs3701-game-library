@@ -22,7 +22,7 @@ The active repository now uses Prisma/SQLite. New databases start empty and reta
 
 ### Phase 8 decisions
 
-- Private S3 uploads and delivery go through Next.js, using IAM and bucket `infs3701-game-library-images` in `us-east-1`.
+- Local mode stores uploaded images in `data/covers/` without AWS. EBS mode uses private S3 uploads and delivery go through Next.js, using IAM and bucket `infs3701-game-library-images` in `us-east-1`.
 - Accept JPEG, PNG and WebP up to 5 MiB. Decode/validate still images up to 40 megapixels. Delete replaced/deleted uploads after committing the game mutation.
 - Require the separate EBS filesystem at `/mnt/game-library-data`; store SQLite at `/mnt/game-library-data/game-library.sqlite`.
 - Back up SQLite with EBS snapshots. Existing in-memory records do not need migration. Snapshotting EBS does not back up S3 image contents.
@@ -37,11 +37,13 @@ The active repository now uses Prisma/SQLite. New databases start empty and reta
 
 ### Local verification
 
-- `npm test`: existing query/validation tests plus real SQLite CRUD, reopening and a fresh Node.js process, normalized uniqueness, optional clearing, image replacement/deletion, ambiguous PUT recovery, failed-delete retry, image byte/type/size checks, stream limits and missing-EBS configuration rejection.
-- `npm run test:e2e`: isolated temporary SQLite and a local S3 protocol stub, with no real AWS access. Existing CRUD/view/drag/filter/mobile flows plus uploaded-cover preview, delivery, unchanged edit, replacement and failed-save retry. Build first; default port 3101, override with `PLAYWRIGHT_PORT`.
+- `npm test`: existing query/validation tests plus real SQLite CRUD, reopening and a fresh Node.js process, normalized uniqueness, optional clearing, image replacement/deletion, ambiguous PUT recovery, failed-delete retry, local filesystem persistence and cleanup, image byte/type/size checks, stream limits and missing-EBS configuration rejection.
+- `npm run test:e2e`: isolated temporary SQLite and local cover files, with no real AWS access. Existing CRUD/view/drag/filter/mobile flows plus uploaded-cover preview, delivery, unchanged edit, replacement and failed-save retry. Build first; default port 3101, override with `PLAYWRIGHT_PORT`.
 - `npm run lint`, `npm run typecheck`, `npm run build`, migration deployment and dependency audit.
 
 Verified on 2026-09-30: all 9 unit/integration tests and 5 Chromium E2E tests passed, as did lint, typecheck, migration deployment, production build and `git diff --check`. Dependency audit reported zero vulnerabilities. These checks do not prove EC2 mounting, IAM permissions or real S3 behavior.
+
+Local cover storage updated on 2026-10-02. All 12 unit/integration tests and 5 Chromium E2E tests passed, along with lint, typecheck and production build. Local upload/display/cleanup verification uses filesystem covers in temporary directories and requires no AWS connection.
 
 ### Owner validation required before completion
 

@@ -44,7 +44,7 @@ AWS_REGION=us-east-1
 S3_BUCKET=infs3701-game-library-images
 ```
 
-Do not set `S3_ENDPOINT` or AWS access keys on EC2. Install dev dependencies too, since the migration CLI and cleanup runner use them.
+Do not set AWS access keys on EC2. Install dev dependencies too, since the migration CLI and cleanup runner use them.
 
 ```sh
 cd /home/ec2-user/infs3701-game-library

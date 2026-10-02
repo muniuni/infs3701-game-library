@@ -2,7 +2,7 @@
 
 ## Current status
 
-Phase 8 application code now uses Prisma/SQLite and private S3 covers. Local verification is documented in the implementation plan. EC2 deployment of Phase 7 was owner-confirmed; Phase 8 cloud deployment and validation are still pending. Metadata integration remains planned.
+Phase 8 application code now uses Prisma/SQLite and local/S3 cover storage. Local verification is documented in the implementation plan. EC2 deployment of Phase 7 was owner-confirmed; Phase 8 cloud deployment and validation are still pending. Metadata integration remains planned.
 
 A single-user personal game library with no authentication. The server owns the library. SQLite retains records across application restarts. New databases start empty; fictional fixtures remain available for tests but are not automatically seeded.
 
@@ -47,11 +47,11 @@ All views use the same browser-side query over fetched records. Kanban sorts wit
 
 Covers support the bundled placeholder, browser-loaded HTTP/HTTPS URLs and uploaded images delivered through `/api/covers/:id`. Failed images fall back to the placeholder. JPEG, PNG and WebP uploads are limited to 5 MiB, 40 megapixels and still images. The server validates and decodes the bytes, re-encodes to remove metadata, and rejects unsupported or corrupt files.
 
-Uploads are sent with the game save as multipart data. SQLite stores the S3 object reference. Editing without changing an upload preserves it; replacing the cover or deleting the game queues the old object for deletion after the database commit. Failed deletes retry through a durable ledger and scheduled cleanup. Unattached uploads left by a crash expire after 24 hours. A failed save preserves the form and selected image for retry; cancelling before save uploads nothing.
+Uploads are sent with the game save as multipart data. SQLite stores the cover object reference. Editing without changing an upload preserves it; replacing the cover or deleting the game queues the old object for deletion after the database commit. Failed deletes retry through a durable ledger and scheduled cleanup. Unattached uploads left by a crash expire after 24 hours. A failed save preserves the form and selected image for retry; cancelling before save uploads nothing.
 
-Local SQLite defaults to `data/game-library.sqlite`. EC2 configuration requires the separate EBS filesystem at `/mnt/game-library-data`, its UUID, and database `/mnt/game-library-data/game-library.sqlite`. Startup and migration fail if that filesystem is unavailable. Existing in-memory records need no migration.
+Local mode stores SQLite in `data/game-library.sqlite` and uploaded images in `data/covers/`, creating the cover directory on the first upload. Both survive application restarts; AWS is not required. `LOCAL_COVERS_DIR` allows an override for isolated tests. EC2 configuration requires the separate EBS filesystem at `/mnt/game-library-data`, its UUID, and database `/mnt/game-library-data/game-library.sqlite`. Startup and migration fail if that filesystem is unavailable. Existing in-memory records need no migration.
 
-S3 uses bucket `infs3701-game-library-images`, `us-east-1`, through the AWS SDK credential chain. Production uses an EC2 IAM role and private objects, with uploads and delivery routed through Next.js. Bucket privacy does not restrict access to this unauthenticated application's endpoints.
+EBS mode uses S3 bucket `infs3701-game-library-images`, `us-east-1`, through the AWS SDK credential chain. Production uses an EC2 IAM role and private objects, with uploads and delivery routed through Next.js. Bucket privacy does not restrict access to this unauthenticated application's endpoints.
 
 The owner has created and attached the EBS volume and created the bucket. Mounting, IAM, bucket privacy, restart persistence and EBS snapshot backup/restore must still be validated by the owner using [the deployment guide](../deploy/README.md). EBS snapshots cover SQLite, not S3 object contents.
 

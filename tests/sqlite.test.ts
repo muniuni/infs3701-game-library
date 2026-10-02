@@ -1,12 +1,13 @@
 import { execFileSync } from "node:child_process";
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PrismaBetterSqlite3 } from "@prisma/adapter-better-sqlite3";
 import { PrismaClient } from "../src/generated/prisma/client";
 import { SqliteGameRepository } from "../src/lib/sqlite-game-repository";
+import { LocalCoverStorage } from "../src/lib/local-cover-storage";
 import { DuplicateGameError } from "../src/lib/repository";
 import { createGameSchema } from "../src/lib/game";
 import type { CoverStorage, ImageUpload } from "../src/lib/cover-storage";
@@ -225,4 +226,36 @@ test("storage configuration rejects missing EBS identity and root-volume fallbac
     }),
   );
   assert.throws(() => assertStorage({ STORAGE_MODE: "ebs" }));
+});
+
+test("SQLite saves, failed saves, replacements and deletion manage local cover files", async () => {
+  const { db, directory } = await setup();
+  const covers = join(directory, "covers");
+  const repo = new SqliteGameRepository(db, new LocalCoverStorage(covers));
+  try {
+    const game = await repo.createGame(input(), image);
+    const firstFiles = await readdir(covers);
+    assert.equal(firstFiles.length, 1);
+    await assert.rejects(repo.createGame(input(), image), DuplicateGameError);
+    assert.deepEqual(await readdir(covers), firstFiles);
+    const next = new SqliteGameRepository(db, new LocalCoverStorage(covers));
+    assert.deepEqual(await next.getCover(firstFiles[0].slice(0, -4)), image);
+    assert.deepEqual(
+      (await next.updateGame(game.id, { title: "Edited" }))?.cover,
+      game.cover,
+    );
+    await next.updateGame(game.id, { status: "Playing" }, image);
+    const replacedFiles = await readdir(covers);
+    assert.equal(replacedFiles.length, 1);
+    assert.notDeepEqual(replacedFiles, firstFiles);
+    await next.updateGame(game.id, { cover: { type: "placeholder" } });
+    assert.deepEqual(await readdir(covers), []);
+    await next.updateGame(game.id, { status: "Completed" }, image);
+    await next.deleteGame(game.id);
+    assert.deepEqual(await readdir(covers), []);
+    assert.equal(await db.coverObject.count(), 0);
+  } finally {
+    await db.$disconnect();
+    await rm(directory, { recursive: true, force: true });
+  }
 });

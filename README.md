@@ -1,6 +1,6 @@
 # Game Library
 
-Single-user Next.js game library with Prisma/SQLite persistence and private S3 cover uploads. Grid, List and Kanban share title search, status/platform/tag/minimum-rating filters and sorting. Add/edit/detail/delete use dialogs; Kanban supports dragging and keyboard-accessible status controls. No authentication or RAWG integration.
+Single-user Next.js game library with Prisma/SQLite persistence and cover uploads stored locally or in private S3. Grid, List and Kanban share title search, status/platform/tag/minimum-rating filters and sorting. Add/edit/detail/delete use dialogs; Kanban supports dragging and keyboard-accessible status controls. No authentication or RAWG integration.
 
 ## Local setup
 
@@ -12,7 +12,7 @@ cp .env.example .env
 npm run dev
 ```
 
-Development applies migrations automatically. SQLite defaults to `data/game-library.sqlite`; new databases start empty and survive process restarts. Local placeholders and external URLs need no AWS setup. Actual uploads require S3 permissions through the AWS credential chain. No credentials are included in the repository.
+Development applies migrations automatically. SQLite defaults to `data/game-library.sqlite`; new databases start empty and survive process restarts. In local mode, uploaded images are saved under `data/covers/` and served through the image API. No AWS setup is needed. EBS mode uses S3 through the AWS credential chain.
 
 ```sh
 npm run db:deploy
@@ -41,4 +41,4 @@ npx playwright install chromium
 npm run test:e2e
 ```
 
-E2E uses disposable SQLite and a local S3 protocol stub on port 3101 (`PLAYWRIGHT_PORT` override). It never accesses real AWS. See the four documents in [docs](docs/) for scope, architecture, design and implementation status.
+E2E uses disposable SQLite and local cover files in a temporary directory on port 3101 (`PLAYWRIGHT_PORT` override). It never accesses real AWS. See the four documents in [docs](docs/) for scope, architecture, design and implementation status.

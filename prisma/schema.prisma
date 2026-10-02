@@ -14,7 +14,7 @@ model Game {
   coverKey String? @unique
 }
 
-// Durable S3 cleanup ledger. Pending uploads expire after one day.
+// Durable cover cleanup ledger. Pending uploads expire after one day.
 model CoverObject {
   key       String @id
   state     String

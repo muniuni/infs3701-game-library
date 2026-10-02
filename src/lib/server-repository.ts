@@ -1,6 +1,6 @@
 import { SqliteGameRepository } from "./sqlite-game-repository";
 import { createDatabase } from "./database";
-import { S3CoverStorage } from "./cover-storage";
+import { createCoverStorage } from "./server-cover-storage";
 const globalStore = globalThis as typeof globalThis & {
   gameRepository?: SqliteGameRepository;
 };
@@ -8,6 +8,6 @@ const globalStore = globalThis as typeof globalThis & {
 export function getRepository() {
   return (globalStore.gameRepository ??= new SqliteGameRepository(
     createDatabase(),
-    new S3CoverStorage(),
+    createCoverStorage(),
   ));
 }

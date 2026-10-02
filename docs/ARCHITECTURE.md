@@ -31,22 +31,23 @@ The repository's `npm start` command itself runs `next start --hostname 0.0.0.0`
 
 ## Implemented code boundaries
 
-| Location                                       | Responsibility                                                                |
-| ---------------------------------------------- | ----------------------------------------------------------------------------- |
-| `src/app/page.tsx`, `src/components/`          | Client library, views, forms and dialogs                                      |
-| `src/lib/game.ts`                              | Domain types, shared create/update schemas and playtime formatting            |
-| `src/lib/library-query.ts`                     | Browser-side search, filters and sorting                                      |
-| `src/app/api/games/`                           | Node.js CRUD route handlers                                                   |
-| `src/lib/repository.ts`                        | Async `GameRepository` interface and Map-backed `InMemoryGameRepository`      |
-| `src/lib/server-repository.ts`                 | Lazy, process-wide SQLite repository and S3 client                            |
-| `src/lib/sqlite-game-repository.ts`            | Prisma CRUD, normalized uniqueness and durable cover cleanup                  |
-| `src/lib/cover-storage.ts`, `mutation-body.ts` | Bounded upload parsing, image decoding and S3 operations                      |
-| `prisma/`, `scripts/`, `deploy/`               | Schema/migrations, filesystem guard, cleanup job and deployment configuration |
-| `src/lib/seed.ts`                              | Six fictional development fixtures                                            |
+| Location                                                    | Responsibility                                                                |
+| ----------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| `src/app/page.tsx`, `src/components/`                       | Client library, views, forms and dialogs                                      |
+| `src/lib/game.ts`                                           | Domain types, shared create/update schemas and playtime formatting            |
+| `src/lib/library-query.ts`                                  | Browser-side search, filters and sorting                                      |
+| `src/app/api/games/`                                        | Node.js CRUD route handlers                                                   |
+| `src/lib/repository.ts`                                     | Async `GameRepository` interface and Map-backed `InMemoryGameRepository`      |
+| `src/lib/server-repository.ts`                              | Lazy, process-wide SQLite repository and mode-selected cover storage          |
+| `src/lib/sqlite-game-repository.ts`                         | Prisma CRUD, normalized uniqueness and durable cover cleanup                  |
+| `src/lib/cover-storage.ts`, `mutation-body.ts`              | Bounded upload parsing, image decoding and S3 operations                      |
+| `src/lib/local-cover-storage.ts`, `server-cover-storage.ts` | Filesystem covers and local/EBS storage selection                             |
+| `prisma/`, `scripts/`, `deploy/`                            | Schema/migrations, filesystem guard, cleanup job and deployment configuration |
+| `src/lib/seed.ts`                                           | Six fictional development fixtures                                            |
 
 Repository operations are `listGames`, `getGame`, `createGame`, `updateGame` and `deleteGame`. Returned records are cloned to prevent callers mutating storage. The server creates IDs/timestamps, validates input and enforces normalized-title uniqueness.
 
-The active repository stores each game as validated JSON, with a database unique normalized-title key and unique optional S3 cover key. This preserves optional values and JavaScript safe-integer playtime without SQLite/Prisma 32-bit narrowing. `CoverObject` records pending, attached and garbage objects. Transactions attach new references and retire old references together. The in-memory implementation remains a test double. There is no persistent browser storage.
+The active repository stores each game as validated JSON, with a database unique normalized-title key and unique optional cover key. This preserves optional values and JavaScript safe-integer playtime without SQLite/Prisma 32-bit narrowing. `CoverObject` records pending, attached and garbage objects. Transactions attach new references and retire old references together. The in-memory implementation remains a test double. There is no persistent browser storage.
 
 ## Implemented API
 
@@ -68,11 +69,11 @@ There is no polling or cross-tab synchronization. Search and sorting do not issu
 
 ## Phase 8 operational boundaries
 
-`STORAGE_MODE=local` uses an absolute local database path, defaulting to `data/game-library.sqlite`. Production defaults to `ebs`. EBS mode checks the exact mount, filesystem UUID and separate device before opening SQLite or running migrations. The PM2 configuration explicitly selects EBS mode; its supplied systemd drop-in also requires the mount. The database and journals reside on the same filesystem.
+`STORAGE_MODE=local` uses an absolute local database path, defaulting to `data/game-library.sqlite`, and filesystem covers at `data/covers/`. Files use generated UUID names with `.jpg`, `.png` or `.webp` extensions; the image API serves them after the game transaction commits. `LOCAL_COVERS_DIR` provides a directory override for isolated tests. The existing ledger also handles local file cleanup. Local mode does not instantiate an S3 client or require AWS credentials. Production defaults to `ebs`. EBS mode checks the exact mount, filesystem UUID and separate device before opening SQLite or running migrations. The PM2 configuration explicitly selects EBS mode; its supplied systemd drop-in also requires the mount. The database and journals reside on the same filesystem.
 
-S3 uses `GetObject`, `PutObject` and `DeleteObject` on `covers/*`, with no public ACL. The EC2 instance profile supplies temporary credentials. The local-only `S3_ENDPOINT` setting enables isolated protocol-stub tests. Upload requests are stream-bounded before multipart parsing and decoded with Sharp before S3 access.
+EBS mode uses S3 `GetObject`, `PutObject` and `DeleteObject` on `covers/*`, with no public ACL. The EC2 instance profile supplies temporary credentials. Upload requests are stream-bounded before multipart parsing and decoded with Sharp before S3 access.
 
-An object is recorded before PUT. A successful database transaction attaches it and queues any old object; failed writes leave recoverable ledger entries. Ambiguous PUT failures retain a pending entry for a second cleanup after 24 hours. Mutations attempt cleanup of their own retired objects; the supplied five-minute systemd timer retries the persistent backlog, up to 100 per run. S3 failures do not roll back an already committed game edit. Deployment must install the timer.
+An object is recorded before writing to the selected storage backend. A successful database transaction attaches it and queues any old object; failed writes leave recoverable ledger entries. Ambiguous PUT failures retain a pending entry for a second cleanup after 24 hours. Mutations attempt cleanup of their own retired objects; the supplied five-minute systemd timer retries the persistent backlog, up to 100 per run. Storage deletion failures do not roll back an already committed game edit. In dev, queued cleanup can be retried with `npm run covers:cleanup`; the production timer is not started automatically. Deployment must install the timer.
 
 The owner performs EC2/AWS validation. Mount and IAM configuration, private S3 reads, reboot behavior and EBS snapshot restoration are not verified locally. [Deployment instructions and configuration](../deploy/README.md) cover these steps. EBS backups contain object references but not historical S3 image contents.
 
