@@ -256,7 +256,7 @@ test("sidebar filters, token entry and cover preview", async ({
 
     const formCover = await page.locator(".form-cover-preview").boundingBox();
     const titleInput = await page
-      .getByRole("textbox", { name: "Title", exact: true })
+      .getByLabel("Title", { exact: true })
       .boundingBox();
     const statusInput = await page
       .getByRole("combobox", { name: "Status", exact: true })
@@ -437,7 +437,7 @@ test("filter recovery, narrow layouts and visible form validation", async ({
       .getByRole("button", { name: "Add Game", exact: true })
       .first()
       .click();
-    await page.getByRole("textbox", { name: "Title", exact: true }).fill("   ");
+    await page.getByLabel("Title", { exact: true }).fill("   ");
 
     await page
       .getByRole("button", { name: "Create game", exact: true })
@@ -472,7 +472,7 @@ test("uploaded cover preview, save, unchanged edit, replacement and failed-save 
     .locator("header")
     .getByRole("button", { name: "Add Game", exact: true })
     .click();
-  await page.getByRole("textbox", { name: "Title" }).fill(title);
+  await page.getByLabel("Title", { exact: true }).fill(title);
   await expect(page.locator(".cover-controls")).toHaveCount(0);
   await expect(page.getByLabel("Cover URL")).toHaveCount(0);
   // Upload is available immediately, without opening the source controls.
@@ -547,7 +547,7 @@ test("uploaded cover preview, save, unchanged edit, replacement and failed-save 
   expect(cover.status()).toBe(200);
   expect(cover.headers()["content-type"]).toBe("image/png");
   await page.getByRole("button", { name: "Edit", exact: true }).click();
-  await page.getByRole("textbox", { name: "Title" }).fill(`${title} edited`);
+  await page.getByLabel("Title", { exact: true }).fill(`${title} edited`);
   await page.getByRole("button", { name: "Save changes", exact: true }).click();
   await expect(
     page.getByRole("button", { name: "Edit", exact: true }),
@@ -601,7 +601,7 @@ test("label suggestions, visible feedback and quick status changes", async ({
       .locator("header")
       .getByRole("button", { name: "Add Game", exact: true })
       .click();
-    await page.getByRole("textbox", { name: "Title", exact: true }).fill(title);
+    await page.getByLabel("Title", { exact: true }).fill(title);
     await page
       .getByRole("group", { name: "Suggested platforms" })
       .getByRole("button", { name: "PC", exact: true })

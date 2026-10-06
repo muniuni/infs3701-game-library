@@ -1,5 +1,12 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useRef,
+  useState,
+  type Ref,
+} from "react";
 import {
   statuses,
   type Game,
@@ -9,9 +16,26 @@ import {
 import { Button } from "./ui/button";
 import { Select } from "./ui/select";
 import { GameCover } from "./game-cover";
+import { IgdbAutofill } from "./igdb-autofill";
+import {
+  createAutofillDraft,
+  mergeIgdbTags,
+  igdbPreferenceKey,
+  metadataFields,
+  readMetadataPreferences,
+  type IgdbGame,
+  type MetadataDraft,
+  type MetadataField,
+  type MetadataPreferences,
+} from "@/lib/igdb";
+import { IgdbTitleInput } from "./igdb-title-input";
+import { AutofillNotice } from "./autofill-notice";
+import type { Cover } from "@/lib/game";
 import { TokenInput } from "./token-input";
 import { Star, Upload } from "lucide-react";
+export type GameFormHandle = { dismissAutofill: () => boolean };
 export function GameForm({
+  ref,
   game,
   platforms = [],
   tags = [],
@@ -19,6 +43,7 @@ export function GameForm({
   onSave,
   onCancel,
 }: {
+  ref?: Ref<GameFormHandle>;
   game?: Game;
   platforms?: string[];
   tags?: string[];
@@ -26,6 +51,55 @@ export function GameForm({
   onSave: (input: UpdateGameInput, image?: File) => Promise<void>;
   onCancel: () => void;
 }) {
+  const [title, setTitle] = useState(game?.title ?? "");
+  const [releaseDate, setReleaseDate] = useState(game?.releaseDate ?? "");
+  const [draftTags, setDraftTags] = useState(game?.tags ?? []);
+  const [cover, setCover] = useState<Cover>(
+    game?.cover ?? { type: "placeholder" },
+  );
+  const [coverChanged, setCoverChanged] = useState(false);
+  const [metadataDraft, setMetadataDraft] = useState<MetadataDraft>();
+  const searchButton = useRef<HTMLButtonElement>(null);
+  const titleInput = useRef<HTMLInputElement>(null);
+  const [preferences, setPreferences] = useState(() => {
+    try {
+      return readMetadataPreferences(localStorage.getItem(igdbPreferenceKey));
+    } catch {
+      return readMetadataPreferences(null);
+    }
+  });
+  const [undo, setUndo] = useState<{
+    sequence: number;
+    before: MetadataDraft;
+    fields: MetadataField[];
+    image?: File;
+    cover: Cover;
+    coverChanged: boolean;
+    uploadError: string;
+  }>();
+  const undoSequence = useRef(0);
+  const clearUndo = useCallback(() => setUndo(undefined), []);
+  function updatePreference(field: MetadataField, checked: boolean) {
+    const next = { ...preferences, [field]: checked };
+    setPreferences(next);
+    try {
+      localStorage.setItem(igdbPreferenceKey, JSON.stringify(next));
+    } catch {}
+  }
+  const form = useRef<HTMLFormElement>(null);
+  function backToForm() {
+    setMetadataDraft(undefined);
+    requestAnimationFrame(() =>
+      (game ? searchButton.current : titleInput.current)?.focus(),
+    );
+  }
+  useImperativeHandle(ref, () => ({
+    dismissAutofill() {
+      if (!metadataDraft) return false;
+      backToForm();
+      return true;
+    },
+  }));
   const [image, setImage] = useState<File>();
   const [uploadError, setUploadError] = useState("");
   const [dragging, setDragging] = useState(false);
@@ -72,6 +146,7 @@ export function GameForm({
   }, [error]);
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (metadataDraft) return;
     const data = new FormData(event.currentTarget);
     const value = (key: string) => String(data.get(key) ?? "").trim();
     const labels = (key: string) =>
@@ -91,7 +166,7 @@ export function GameForm({
         hours || minutes ? Number(hours) * 60 + Number(minutes) : null,
       rating: rating || null,
       review: value("review") || null,
-      cover: { type: "placeholder" },
+      cover: cover.type === "url" ? cover : { type: "placeholder" },
     };
     const parsed = createGameSchema.safeParse(input);
     if (!parsed.success) {
@@ -99,15 +174,123 @@ export function GameForm({
       return;
     }
     setError("");
+    clearUndo();
     const savedInput: UpdateGameInput = { ...parsed.data };
-    if (game && !image) delete savedInput.cover;
+    if (game && !image && !coverChanged) delete savedInput.cover;
     await onSave(savedInput, image);
   }
-  const hasCover = !!image || (!!game && game.cover.type !== "placeholder");
+  function currentMetadata(): MetadataDraft {
+    const data = new FormData(form.current!);
+    return {
+      title,
+      releaseDate,
+      tags: String(data.get("tags") ?? "")
+        .split(",")
+        .map((value) => value.trim())
+        .filter(Boolean),
+      cover: preview ? { type: "upload", url: preview } : cover,
+    };
+  }
+  function applyMetadata(proposal: IgdbGame, choices: MetadataPreferences) {
+    if (choices.title) setTitle(proposal.title);
+    if (choices.releaseDate && proposal.releaseDate)
+      setReleaseDate(proposal.releaseDate);
+    if (choices.tags && proposal.tags)
+      setDraftTags(mergeIgdbTags(currentMetadata().tags, proposal.tags));
+    if (choices.cover && proposal.cover) {
+      setCover(proposal.cover);
+      setCoverChanged(true);
+      setImage(undefined);
+      setPreview(undefined);
+      setUploadError("");
+    }
+    setError("");
+  }
+  function applyCreate(proposal: IgdbGame) {
+    const before = currentMetadata();
+    const result = createAutofillDraft(before, proposal, preferences);
+    // A later selection supersedes the prior Undo, even when no fields change.
+    clearUndo();
+    if (!result.changed.length) return;
+    setUndo({
+      sequence: ++undoSequence.current,
+      before,
+      fields: result.changed,
+      image,
+      cover,
+      coverChanged,
+      uploadError,
+    });
+    setTitle(result.draft.title);
+    setReleaseDate(result.draft.releaseDate);
+    setDraftTags(result.draft.tags);
+    if (result.changed.includes("cover")) {
+      setCover(result.draft.cover);
+      setCoverChanged(true);
+    }
+    setError("");
+  }
+  function restoreAutofill() {
+    if (!undo) return;
+    if (undo.fields.includes("title")) setTitle(undo.before.title);
+    if (undo.fields.includes("releaseDate"))
+      setReleaseDate(undo.before.releaseDate);
+    if (undo.fields.includes("tags")) setDraftTags(undo.before.tags);
+    if (undo.fields.includes("cover")) {
+      setCover(undo.cover);
+      setCoverChanged(undo.coverChanged);
+      setImage(undo.image);
+      setPreview(undo.image ? URL.createObjectURL(undo.image) : undefined);
+      setUploadError(undo.uploadError);
+    }
+    clearUndo();
+    requestAnimationFrame(() => titleInput.current?.focus());
+  }
+  const hasCover = !!image || cover.type !== "placeholder";
   return (
-    <form onSubmit={submit} className="game-form">
-      <div className="form-fields">
+    <form ref={form} onSubmit={submit} className="game-form">
+      {metadataDraft && (
+        <IgdbAutofill
+          draft={metadataDraft}
+          onBack={backToForm}
+          onApply={(proposal, choices) => {
+            if (game) applyMetadata(proposal, choices);
+            else applyCreate(proposal);
+            backToForm();
+          }}
+        />
+      )}
+      <div className="form-fields" hidden={!!metadataDraft}>
         <fieldset disabled={busy}>
+          <div className="igdb-entry">
+            {!game && (
+              <details className="igdb-preferences">
+                <summary>Autofill fields</summary>
+                <div className="igdb-preference-options">
+                  {metadataFields.map((field) => (
+                    <label className="igdb-checkbox" key={field}>
+                      <input
+                        type="checkbox"
+                        aria-label={`Autofill ${field === "releaseDate" ? "release date" : field === "tags" ? "genres" : field}`}
+                        checked={preferences[field]}
+                        onChange={(event) =>
+                          updatePreference(field, event.target.checked)
+                        }
+                      />
+                      {
+                        {
+                          title: "Title",
+                          releaseDate: "Release date",
+                          cover: "Cover",
+                          tags: "Genres (Tags)",
+                        }[field]
+                      }
+                    </label>
+                  ))}
+                </div>
+              </details>
+            )}
+          </div>
           <div className="form-overview">
             <section className="cover-section" aria-labelledby="cover-heading">
               <h3 id="cover-heading" className="field-label">
@@ -135,12 +318,8 @@ export function GameForm({
                   }}
                 >
                   <GameCover
-                    cover={
-                      preview
-                        ? { type: "upload", url: preview }
-                        : (game?.cover ?? { type: "placeholder" })
-                    }
-                    title={game?.title || "Game"}
+                    cover={preview ? { type: "upload", url: preview } : cover}
+                    title={title || "Game"}
                   />
                   <span className="cover-preview-action">
                     <Upload size={14} aria-hidden="true" />
@@ -178,17 +357,44 @@ export function GameForm({
               )}
             </section>
             <div className="form-identity">
-              <label>
-                Title <span aria-hidden="true">*</span>
-                <input
-                  name="title"
-                  defaultValue={game?.title}
-                  required
-                  maxLength={160}
-                  placeholder="Game title"
-                  autoFocus
+              {game ? (
+                <div className="edit-title-field">
+                  <div className="title-label-row">
+                    <label htmlFor="edit-game-title">
+                      Title <span aria-hidden="true">*</span>
+                    </label>
+                    <Button
+                      ref={searchButton}
+                      type="button"
+                      variant="ghost"
+                      className="title-autofill"
+                      onClick={() => setMetadataDraft(currentMetadata())}
+                    >
+                      Autofill
+                    </Button>
+                  </div>
+                  <input
+                    id="edit-game-title"
+                    ref={titleInput}
+                    name="title"
+                    aria-label="Title"
+                    value={title}
+                    onChange={(event) => setTitle(event.target.value)}
+                    required
+                    maxLength={160}
+                    placeholder="Game title"
+                    autoFocus
+                  />
+                </div>
+              ) : (
+                <IgdbTitleInput
+                  value={title}
+                  onValueChange={setTitle}
+                  onSelect={applyCreate}
+                  disabled={busy || !!metadataDraft}
+                  inputRef={titleInput}
                 />
-              </label>
+              )}
               <label>
                 Status
                 <Select
@@ -216,7 +422,8 @@ export function GameForm({
             <TokenInput
               name="tags"
               label="Tags"
-              initial={game?.tags}
+              value={draftTags}
+              onValueChange={setDraftTags}
               suggestions={tags}
               disabled={busy}
             />
@@ -227,7 +434,8 @@ export function GameForm({
               <input
                 name="releaseDate"
                 type="date"
-                defaultValue={game?.releaseDate}
+                value={releaseDate}
+                onChange={(event) => setReleaseDate(event.target.value)}
               />
             </label>
             <div className="playtime-field">
@@ -345,7 +553,15 @@ export function GameForm({
           )}
         </fieldset>
       </div>
-      <div className="dialog-actions form-actions">
+      {!busy && undo && (
+        <AutofillNotice
+          key={undo.sequence}
+          count={undo.fields.length}
+          onUndo={restoreAutofill}
+          onExpire={clearUndo}
+        />
+      )}
+      <div className="dialog-actions form-actions" hidden={!!metadataDraft}>
         <Button
           type="button"
           variant="secondary"

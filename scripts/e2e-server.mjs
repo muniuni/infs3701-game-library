@@ -7,6 +7,9 @@ const directory = mkdtempSync(join(tmpdir(), "game-library-e2e-"));
 const env = {
   ...process.env,
   NODE_ENV: "production",
+  // Provider UI tests intercept requests; never use real credentials or APIs.
+  IGDB_CLIENT_ID: "",
+  IGDB_CLIENT_SECRET: "",
   STORAGE_MODE: "local",
   DATABASE_URL: `file:${join(directory, "library.sqlite")}`,
   LOCAL_COVERS_DIR: join(directory, "covers"),

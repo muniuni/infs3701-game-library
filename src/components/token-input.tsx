@@ -10,6 +10,8 @@ export function TokenInput({
   suggestions = [],
   chips = false,
   disabled = false,
+  value,
+  onValueChange,
 }: {
   name: string;
   label: string;
@@ -17,8 +19,16 @@ export function TokenInput({
   suggestions?: string[];
   chips?: boolean;
   disabled?: boolean;
+  value?: string[];
+  onValueChange?: (value: string[]) => void;
 }) {
-  const [tokens, setTokens] = useState(initial);
+  const [internalTokens, setInternalTokens] = useState(initial);
+  const tokens = value ?? internalTokens;
+  function setTokens(update: (previous: string[]) => string[]) {
+    const next = update(tokens);
+    if (onValueChange) onValueChange(next);
+    else setInternalTokens(next);
+  }
   const [draft, setDraft] = useState("");
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(-1);

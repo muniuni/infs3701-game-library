@@ -24,7 +24,7 @@ import {
   DialogTitle,
 } from "./ui/dialog";
 import { GameCover } from "./game-cover";
-import { GameForm } from "./game-form";
+import { GameForm, type GameFormHandle } from "./game-form";
 import {
   formatPlaytime,
   statuses,
@@ -66,6 +66,7 @@ export function Library() {
   }, [notice]);
   const [view, setView] = useState<Mode>("grid");
   const [filters, setFilters] = useState<Filters>(initialFilters);
+  const gameForm = useRef<GameFormHandle>(null);
   const [dialog, setDialog] = useState<OpenDialog>(null);
   const [busy, setBusy] = useState(false);
   const [dragged, setDragged] = useState<string | null>(null);
@@ -728,7 +729,8 @@ export function Library() {
       <Dialog
         open={dialog !== null}
         onOpenChange={(isOpen) => {
-          if (!isOpen && !busy) setDialog(null);
+          if (!isOpen && !busy && !gameForm.current?.dismissAutofill())
+            setDialog(null);
         }}
       >
         <DialogContent
@@ -778,6 +780,7 @@ export function Library() {
           )}
           {(dialog?.mode === "add" || dialog?.mode === "edit") && (
             <GameForm
+              ref={gameForm}
               key={dialog.mode === "add" ? "new" : selected?.id}
               game={selected}
               platforms={platforms}
