@@ -52,6 +52,8 @@ Implemented remembered account input, full-library enrichment before a unified s
 
 Local verification includes account/URL validation, inaccessible/empty libraries, hidden playtime, retry/error privacy, IGDB external-ID matching, mode safeguards, tag/platform unions, identity conflicts, stale previews and lost-response replay. Chromium scenarios cover new imports, repeat playtime updates, remembered account/global mode, inline Status, mode precedence/restoration, loading bounds, Cancel confirmation, narrow layouts, metadata failure, partial success/retry and IGDB-discovered existing records. Existing IGDB and library scenarios also pass. Latest automated result: 29 unit/integration tests and 23 Chromium E2E tests, plus lint, typecheck and production build. Desktop/mobile import-review screenshots were inspected. These use mocked providers and isolated databases; no real Steam or new EC2 validation is claimed.
 
+Steam import compatibility fix: operation IDs now support HTTP deployments without `crypto.randomUUID()`. ID creation failures appear as recoverable row errors. Browser regression coverage exercises the fallback, distinct IDs, lost-response retry with the same ID and recovery after unavailable browser crypto. Validation passed 34 unit/integration tests, 24 Chromium E2E tests, lint, typecheck, production build and `git diff --check`. Deployed validation remains pending.
+
 ### Setup and remaining live validation
 
 1. Configure `STEAM_WEB_API_KEY` through Secrets Manager on EC2 or `.env` locally. Configure `IGDB_CLIENT_ID` and `IGDB_CLIENT_SECRET` through the same source for enrichment; Steam-only import remains available without IGDB. No `NEXT_PUBLIC_` keys or Steam account environment variable are used.

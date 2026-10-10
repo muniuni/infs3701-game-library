@@ -171,15 +171,31 @@ test("Global modes gate individual editing, preserve overrides and status, and r
     page.getByRole("combobox", { name: "Update mode for Steam Adventure" }),
   ).toContainText("Update if empty");
 });
-test("Enrichment failure offers fallback; lost save responses retry without duplicates", async ({
+test("Without randomUUID, Steam imports and retries lost responses without duplicates", async ({
   page,
   request,
 }) => {
   await page.route("**/api/steam/enrich", (route) =>
     route.fulfill({ status: 503, json: { error: "IGDB unavailable" } }),
   );
+  // Reproduce the missing API on plain HTTP while retaining secure random bytes.
+  await page.evaluate(() => {
+    Object.defineProperty(crypto, "randomUUID", {
+      value: undefined,
+      configurable: true,
+    });
+  });
+  const operations: { appId: number; operationId: string }[] = [];
   let failed = false;
   await page.route("**/api/steam/import", async (route) => {
+    const entry = route.request().postDataJSON().entries[0];
+    operations.push({
+      appId: entry.steam.appId,
+      operationId: entry.operationId,
+    });
+    expect(entry.operationId).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+    );
     if (!failed) {
       failed = true;
       await route.fetch();
@@ -200,6 +216,9 @@ test("Enrichment failure offers fallback; lost save responses retry without dupl
   await page.getByRole("button", { name: "Retry 1 game", exact: true }).click();
   await expect(page.getByRole("dialog")).toHaveCount(0);
   expect(await (await request.get("/api/games")).json()).toHaveLength(2);
+  expect(operations).toHaveLength(3);
+  expect(operations[2]).toEqual(operations[0]);
+  expect(operations[1].operationId).not.toBe(operations[0].operationId);
 });
 test("ID matches are unselected on first display; changing status selects them without changing metadata", async ({
   page,
@@ -301,4 +320,47 @@ test("Steam loading reserves the list space and never shows unenriched rows", as
   ).toBeVisible();
   const after = await page.locator(".steam-dialog").boundingBox();
   expect(after?.height).toBe(before?.height);
+});
+
+test("Import ID creation failure stays recoverable in the dialog", async ({
+  page,
+  request,
+}) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await open(page);
+  await page.evaluate(() => {
+    Object.defineProperty(crypto, "randomUUID", {
+      value: undefined,
+      configurable: true,
+    });
+    Object.defineProperty(crypto, "getRandomValues", {
+      value: undefined,
+      configurable: true,
+    });
+  });
+  await page
+    .getByRole("button", { name: "Import 2 games", exact: true })
+    .click();
+  await expect(
+    page
+      .getByText(
+        "Your browser cannot create an import ID. Try another browser.",
+      )
+      .first(),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Retry 2 games", exact: true }),
+  ).toBeEnabled();
+  expect(await (await request.get("/api/games")).json()).toHaveLength(0);
+  expect(errors).toEqual([]);
+  await page.evaluate(() => {
+    Reflect.deleteProperty(crypto, "randomUUID");
+    Reflect.deleteProperty(crypto, "getRandomValues");
+  });
+  await page
+    .getByRole("button", { name: "Retry 2 games", exact: true })
+    .click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  expect(await (await request.get("/api/games")).json()).toHaveLength(2);
 });

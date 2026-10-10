@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
+import { browserUuid } from "@/lib/browser-uuid";
 import { DropdownMenu } from "radix-ui";
 import {
   Check,
@@ -416,20 +417,20 @@ export function SteamImport({
       for (let offset = 0; offset < chosen.length; offset++) {
         const row = chosen[offset];
         const id = row.steam.appId;
-        let entry = entries.current.get(id);
-        if (!entry) {
-          entry = {
-            operationId: crypto.randomUUID(),
-            steam: row.steam,
-            igdb: row.igdb,
-            targetId: row.current?.id,
-            expectedUpdatedAt: row.current?.updatedAt,
-            choices: row.choices,
-            status: statusDrafts[id],
-          };
-          entries.current.set(id, entry);
-        }
         try {
+          let entry = entries.current.get(id);
+          if (!entry) {
+            entry = {
+              operationId: browserUuid(),
+              steam: row.steam,
+              igdb: row.igdb,
+              targetId: row.current?.id,
+              expectedUpdatedAt: row.current?.updatedAt,
+              choices: row.choices,
+              status: statusDrafts[id],
+            };
+            entries.current.set(id, entry);
+          }
           const result = await post<{
             results: { appId: number; game?: Game; error?: string }[];
           }>("import", { entries: [entry] });
