@@ -35,7 +35,7 @@ Grid, List and five-column Kanban share browser-side search, filters and sorting
 
 Default sort is recently added. Title sorts alphabetically; dates/timestamps sort newest first, rating/playtime highest first. Unset values come last, with title as the tiebreaker. View/search/filter settings reset on page reload.
 
-Add, details, edit and confirmed delete use dialogs. Platform chips and tag autocomplete suggest existing library values while allowing custom entries. Successful creation returns to the library. Successful editing also returns to the library. Grid, List, Kanban and Details offer quick status changes; Kanban also supports dragging. Status changes apply immediately and roll back on failure. Save, delete and status changes show brief success feedback. Loading, empty, no-match, saving and error states include appropriate reload/reset actions.
+Add, details, edit and confirmed delete use dialogs. Platform chips and tag autocomplete suggest existing library values while allowing custom entries. Successful creation and editing return to the library. Successful editing also returns to the library. Grid, List, Kanban and Details offer quick status changes; Kanban also supports dragging. Status changes apply immediately and roll back on failure. Save, delete and status changes show brief success feedback. Loading, empty, no-match, saving and error states include appropriate reload/reset actions.
 
 ## Covers and storage
 
@@ -43,7 +43,7 @@ Create/edit forms offer file upload and replacement through the cover preview, w
 
 Uploads accept still JPEG, PNG and WebP images up to 5 MiB and 40 megapixels. The server checks the declared format against decoded bytes, re-encodes without metadata and also limits the stored result to 5 MiB.
 
-Uploads are sent with the game save and displayed through `/api/covers/:id`. Unrelated edits preserve the image; replacement or game deletion retires the old object after the database commit. Failed saves retain the form/image for retry. Cancelling before save uploads nothing.
+Uploads are sent with the game save and displayed through `/api/covers/:id`. Unrelated edits preserve the image; replacement or game deletion retires the old object after the database commit. Failed saves retain the form/image for retry. Opening the unsaved-change confirmation uploads nothing. Discard abandons the draft without uploading; Save and close saves the game and selected cover.
 
 | Mode    | Database                                     | Uploaded images                                                  |
 | ------- | -------------------------------------------- | ---------------------------------------------------------------- |
@@ -74,7 +74,7 @@ IGDB supplies title, complete first release date, cover, genres mapped to Tags, 
 - Missing/empty provider values never clear current fields. A Tags union above 30 blocks application until Tags is deselected or existing tags are reduced; no silent truncation.
 - Applying also confirms the chosen IGDB identity and refreshes available platform options. Identity-only linking is permitted. Discard confirms neither. Selected platforms and personal fields stay unchanged.
 
-Summary/storyline remain editable independently of Review. Screenshots support expansion, removal and reordering, not manual image uploads. Details show companies, summary, collapsible storyline and the gallery. No filled-source badges, changed-field counters, instructional banners, timed Undo or persisted IGDB field preferences remain. Cancel, outside click, Escape and Close dismiss unchanged forms immediately. Changed drafts show Save and close, Discard and Keep editing. Confirmed comparison saves use the current mode. Nested viewers and selection menus close independently. Invalid input keeps the form open. Back preserves creation input; edit Back uses the same unsaved-change confirmation. Successful creation returns to the library. Failed saves retain values/uploads for retry.
+Summary/storyline remain editable independently of Review. Screenshots support expansion, removal and reordering, not manual image uploads. Details show companies, summary, collapsible storyline and the gallery. No filled-source badges, changed-field counters, instructional banners, timed Undo or persisted IGDB field preferences remain. Cancel, outside click, Escape and Close dismiss unchanged forms immediately. Changed drafts show Save and close, Discard and Keep editing. Confirmed comparison saves use the current mode. Nested viewers and selection menus close independently. Invalid input keeps the form open. Back preserves creation input; edit Back uses the same unsaved-change confirmation. Successful creation and editing return to the library. Failed saves retain values/uploads for retry.
 
 The additive SQLite migration adds a nullable unique IGDB ID without deleting existing data. Legacy JSON fields default to empty in the form; legacy identity remains unlinked. Title and IGDB identity conflicts are reported separately.
 

@@ -24,7 +24,7 @@ No migration of previous in-memory records is required. EBS snapshot instruction
 
 ## Verification
 
-On 2026-10-10, the redesigned IGDB workflow passed 22 unit/integration tests, 17 Chromium E2E tests, lint, typecheck and production build. The additive migration was also applied successfully to the local database without deleting data. Desktop/mobile form, detail, comparison and screenshot-viewer captures were visually inspected. Unit/integration coverage includes expanded normalization, update-mode semantics, cancellation, unique identity persistence, old records, cover retirement and request size limits. Browser coverage includes create search/preview/form, platform selection, draft preservation, all update modes, linking/cancel, failures, responsive layout and existing library/upload interactions.
+On 2026-10-10, the redesigned IGDB workflow passed 22 unit/integration tests, 17 Chromium E2E tests, lint, typecheck and production build. The additive migration was also applied successfully to the local database without deleting data. Desktop/mobile search/loading, save-confirmation, form, detail, comparison and screenshot-viewer captures were visually inspected. Unit/integration coverage includes expanded normalization, update-mode semantics, cancellation, unique identity persistence, old records, cover retirement and request size limits. Browser coverage includes create search/preview/form, platform selection, draft preservation, all update modes, linking/cancel, failures, responsive layout and existing library/upload interactions.
 
 Run `npm test`, `npm run lint`, `npm run typecheck`, `npm run build`, then `PLAYWRIGHT_PORT=3117 npm run test:e2e`. E2E uses temporary SQLite/local covers and mocked provider data. Live IGDB and EC2 deployment verification are separate and remain pending.
 
@@ -35,6 +35,8 @@ Cloud deployment and validation were confirmed complete by the owner on 2026-10-
 ## Phase 9 IGDB delivered
 
 The original autofill UI is replaced by search/preview/form creation and ID-based metadata updates. The three update modes default to empty-only and offer replacement/manual selection with a read-only diff. Tags merge, uploaded covers may be replaced, selected platforms remain personal, and ID/platform options are saved with confirmed metadata. Expanded fields include companies, summary, storyline and screenshot references. Old badges/preferences/Undo and title-autocomplete components are removed. Steam import is not implemented.
+
+UI refinement includes stable search/viewer dimensions, unclipped focus outlines, cover-led forms/details, personal fields before metadata, plain company inputs, fixed detail actions and return to the library after creation/editing. Browser checks cover confirmed dismissal persistence, Cancel-triggered confirmation, stable search loading, validation and retry.
 
 ### Setup and manual validation
 
@@ -65,5 +67,3 @@ IGDB metadata redesign includes the additive IGDB identity migration. Live-provi
 ## Phase 10
 
 For Phase 10, review Weeks 1–4 course material, select three justified Going Beyond extensions and record their rationale and evidence. None has been selected.
-
-UI refinement includes stable search/viewer dimensions, unclipped focus outlines, cover-led forms/details, personal fields before metadata, plain company inputs, fixed detail actions and return to the library after creation/editing. Browser checks cover confirmed dismissal persistence, cancellation, validation and retry.
