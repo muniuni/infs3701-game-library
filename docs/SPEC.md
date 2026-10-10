@@ -95,6 +95,12 @@ Local storage remembers the account ID and global mode only. Default fields has 
 
 Cancel, outside click, Escape and Close prompt Review import / Discard / Keep editing when input or selection settings have changed. Review import returns to review, never commits. Saving blocks dismissal. Each game saves independently; successful rows leave the selection and failures retain choices for retry. A durable receipt makes retries safe after a lost response, and stale existing-game previews require reloading. All-success returns to the library; partial success stays in the import dialog. Reload library refreshes current records and resets temporary row overrides for a new review.
 
+## Provider credentials
+
+IGDB and Steam credentials remain server-only. Production defaults to AWS Secrets Manager in `us-east-1`, using `infs3701/game-library/igdb` and `infs3701/game-library/steam` through the EC2 role. Successful reads are cached in process memory for five minutes and refreshed on demand. Failed or invalid reads return a safe service-unavailable response; manual game entry remains available.
+
+Local development retains `.env`/`.env.local` support. Set `SECRETS_SOURCE=env` for local production-build testing; set `SECRETS_SOURCE=aws` for EC2. AWS mode never falls back to environment credentials. No credential values are sent to the browser or persisted with games. See [Architecture](ARCHITECTURE.md#server-credentials) for configuration details.
+
 ## Out of scope
 
 Authentication, multiple users, social features, recommendations, scheduled store/account sync and dedicated game pages. Phase 9 adds manual Steam import only; RAWG integration is not planned.

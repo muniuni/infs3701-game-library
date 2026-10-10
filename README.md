@@ -20,7 +20,7 @@ npm run build
 npm start
 ```
 
-The example `.env` sets `STORAGE_MODE=local` for local production-build testing. EC2 must use EBS mode; see the [deployment runbook](deploy/README.md). Phase 8 cloud deployment and validation are complete, owner-confirmed on 2026-10-02.
+The example `.env` sets `STORAGE_MODE=local` and `SECRETS_SOURCE=env` for local production-build testing. IGDB and Steam credentials can be supplied through `.env`/`.env.local`; EC2 uses `SECRETS_SOURCE=aws` to retrieve both provider secrets from Secrets Manager in `us-east-1` through its instance role. EC2 must use EBS mode; see the [deployment runbook](deploy/README.md). Phase 8 cloud deployment and validation are complete, owner-confirmed on 2026-10-02.
 
 ## API
 

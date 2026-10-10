@@ -42,6 +42,7 @@ DATABASE_URL=file:/mnt/game-library-data/game-library.sqlite
 EBS_VOLUME_UUID=DATA_FILESYSTEM_UUID
 AWS_REGION=us-east-1
 S3_BUCKET=infs3701-game-library-images
+SECRETS_SOURCE=aws
 ```
 
 Do not set AWS access keys on EC2. Install dev dependencies too, since the migration CLI and cleanup runner use them.
@@ -106,3 +107,22 @@ sqlite3 -readonly /mnt/game-library-restore/game-library.sqlite 'PRAGMA integrit
 Expected result is `ok` plus the saved game. Install the SQLite CLI if it is not available. Keep the snapshot and restore evidence; unmount and remove only the temporary restored volume after verification.
 
 EBS snapshots back up database records, including object references, but do not back up S3 objects. Covers deleted since an older snapshot cannot be recovered from EBS; recovering historical cover images needs a separate S3 retention/version-recovery policy. Do not claim full image recovery from this drill.
+
+## 6. Provider secrets
+
+Attach `secrets-manager-policy.json` to the existing EC2 role after replacing `ACCOUNT_ID` with the account owning the secrets. The six `?` characters match AWS's generated secret ARN suffix; exact secret ARNs may be substituted. Keep the S3 policy attached too. The policy grants only `secretsmanager:GetSecretValue` for the two named secrets in `us-east-1`. If a secret uses a customer-managed KMS key, additionally grant `kms:Decrypt` on that key and ensure its key policy allows the role. See [AWS GetSecretValue permissions](https://docs.aws.amazon.com/secretsmanager/latest/apireference/API_GetSecretValue.html) and [SDK credential resolution](https://docs.aws.amazon.com/sdk-for-javascript/v3/developer-guide/setting-credentials-node.html).
+
+The existing secrets must contain JSON objects with these string keys:
+
+| Secret name | Required keys |
+| --- | --- |
+| `infs3701/game-library/igdb` | `IGDB_CLIENT_ID`, `IGDB_CLIENT_SECRET` |
+| `infs3701/game-library/steam` | `STEAM_WEB_API_KEY` |
+
+Set `SECRETS_SOURCE=aws` on EC2, as in the supplied PM2 config. The app uses the role through the SDK credential chain. Remove static AWS access keys from the process environment/shared AWS configuration so they do not take precedence over the instance role. Provider `.env` values are ignored in AWS mode. Ensure the instance can reach the regional Secrets Manager endpoint over HTTPS, through internet egress or a configured VPC endpoint, plus the external provider endpoints.
+
+Run `npm ci`, rebuild, and restart the existing PM2 app with the updated ecosystem config. This credential change needs no schema migration. Retrieval starts on first provider use. Each secret is cached for five minutes per process; a later request refreshes it. Restarting clears the cache immediately. Failed refreshes return a safe 503 and retry on the next request without serving stale values or falling back to `.env`.
+
+For local work, keep `SECRETS_SOURCE=env` in `.env.local` (including when testing `next start`) and supply the existing provider variables there. Without an explicit source, development/test uses environment values and production uses AWS. Secrets stay in server memory and are not copied into environment files by the application.
+
+After deployment, test IGDB search/details and a Steam library preview, then repeat after five minutes to verify refresh. Confirm successful role-based `GetSecretValue` calls in CloudTrail without logging secret values. Check that an unavailable secret produces a safe retryable provider error and that manual entry still works. Repository tests use synthetic responses; live AWS access and real-provider validation have not been performed by this change.

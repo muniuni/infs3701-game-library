@@ -43,6 +43,8 @@ Visible focus, labelled controls, title-based image alt text, Radix modal focus 
 
 Loading, empty, no-match, saving/deleting and error states are present. Library errors offer reload; no-match states offer filter reset. Errors use alerts; local form errors receive focus and scroll into view. Success notifications float above dialogs at the viewport bottom for five seconds, with a screen-reader status region and no layout shift. Broken covers use the bundled placeholder.
 
+Provider credential retrieval stays on the server. Secrets Manager lookup failures use the existing provider error/retry states; manual entry remains available. No credential inputs or secret values appear in the UI.
+
 ## Phase 9 IGDB interaction (implemented)
 
 Add starts with a title search, Search button and subdued Add manually action. A nonblank query debounces for 150 ms. Results occupy a scrollable list with cover, title, year and platform names. Keyboard Up/Down and Enter select a result; composition suppresses searches. Explicit Search bypasses the debounce. Selection opens a preview with company names, summary, collapsible storyline and expandable screenshots. Continue opens the editable form; Back preserves query/results and the form draft.

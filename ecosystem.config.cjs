@@ -9,6 +9,7 @@ module.exports = {
       exec_mode: "fork",
       env: {
         NODE_ENV: "production",
+        SECRETS_SOURCE: "aws",
         STORAGE_MODE: "ebs",
         DATABASE_URL: "file:/mnt/game-library-data/game-library.sqlite",
         AWS_REGION: "us-east-1",

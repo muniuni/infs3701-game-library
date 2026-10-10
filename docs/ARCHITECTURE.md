@@ -45,9 +45,19 @@ Errors return an `error` string with 400 for invalid input, 404 for missing reco
 
 React holds a fetched copy plus UI state. Create/edit use server responses, delete removes records after success, and quick status changes across all views roll back on failure. A browser action lock prevents overlapping mutations. There is no polling or cross-tab synchronization. External cover URLs are fetched directly by the browser.
 
+## Server credentials
+
+`server-secrets.ts` lazily reads JSON `SecretString` values from Secrets Manager in `us-east-1`: `infs3701/game-library/igdb` supplies `IGDB_CLIENT_ID` and `IGDB_CLIENT_SECRET`; `infs3701/game-library/steam` supplies `STEAM_WEB_API_KEY`. Region is fixed for these secrets, independent of S3's `AWS_REGION`. AWS SDK v3 uses its default credential chain, including the EC2 instance role; no static AWS keys are configured by the app.
+
+`SECRETS_SOURCE=aws` selects Secrets Manager; `SECRETS_SOURCE=env` selects server environment variables loaded by Next.js from `.env`/`.env.local`. The default is `aws` in production and `env` otherwise. `.env.example` explicitly selects `env` for local production-build testing; the EC2 PM2 config explicitly selects `aws`. AWS mode ignores provider credentials in the environment, including on failure. Invalid source values fail closed.
+
+The process-wide loader shares successful values across route bundles for five minutes per secret and coalesces concurrent reads. Expiry triggers a fresh read on next use; failures are not cached and expired values are not served. JSON must contain every required nonblank string. Secrets Manager requests use an eight-second abort deadline and at most two SDK attempts. No retrieval occurs during module initialization/build, and secrets are never written to disk or `process.env`. Provider clients map lookup failures to safe 503 errors. IGDB's token cache also compares credentials, so refreshed credentials trigger a new token. Each application process has its own cache; restart clears it.
+
+See the [deployment runbook](../deploy/README.md#6-provider-secrets) for IAM permissions and live validation. Local tests use synthetic secrets; EC2 role access remains unverified by this change.
+
 ## Phase 9 IGDB autofill (implemented)
 
-`server-igdb.ts` is a Node-only provider client shared through `globalThis` across API route bundles. Configure `IGDB_CLIENT_ID` and `IGDB_CLIENT_SECRET` on the server. Twitch client-credentials tokens are cached until one minute before expiry, with one renewal/retry after a 401. Requests run sequentially at least 260 ms apart, with at most 20 pending calls, an 8-second timeout per outbound request and a 1 MiB response limit. IGDB 429/5xx responses retry once, with a bounded delay. Errors return safe messages without credentials or upstream response bodies.
+`server-igdb.ts` is a Node-only provider client shared through `globalThis` across API route bundles. It resolves `IGDB_CLIENT_ID` and `IGDB_CLIENT_SECRET` through `server-secrets.ts`. Twitch client-credentials tokens are cached until one minute before expiry, with one renewal/retry after a 401. Requests run sequentially at least 260 ms apart, with at most 20 pending calls, an 8-second timeout per outbound request and a 1 MiB response limit. IGDB 429/5xx responses retry once, with a bounded delay. Errors return safe messages without credentials or upstream response bodies.
 
 | Method and path              | Responsibility                                                 |
 | ---------------------------- | -------------------------------------------------------------- |

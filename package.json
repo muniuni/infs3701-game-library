@@ -24,6 +24,7 @@
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1143.0",
+    "@aws-sdk/client-secrets-manager": "^3.1149.0",
     "@fontsource/jersey-10": "^5.3.0",
     "@fontsource/manrope": "^5.3.0",
     "@prisma/adapter-better-sqlite3": "^7.10.0",

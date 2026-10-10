@@ -7,6 +7,7 @@ const directory = mkdtempSync(join(tmpdir(), "game-library-e2e-"));
 const env = {
   ...process.env,
   NODE_ENV: "production",
+  SECRETS_SOURCE: "env",
   // Provider UI tests intercept requests; never use real credentials or APIs.
   STEAM_WEB_API_KEY: "",
   IGDB_CLIENT_ID: "",

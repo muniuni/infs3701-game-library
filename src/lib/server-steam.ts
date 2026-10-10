@@ -1,4 +1,5 @@
 // Server-only: never send the Web API key or upstream URLs to the browser.
+import { serverSecrets } from "./server-secrets";
 import { z } from "zod";
 import { steamOwnedSchema, type SteamOwned } from "./steam";
 export class SteamError extends Error {
@@ -85,7 +86,7 @@ export function normalizeOwned(value: unknown): SteamOwned[] {
 }
 export function createSteamClient(
   options: {
-    key?: () => string | undefined;
+    key?: () => string | undefined | Promise<string | undefined>;
     fetch?: typeof fetch;
     wait?: (ms: number) => Promise<void>;
   } = {},
@@ -99,10 +100,19 @@ export function createSteamClient(
     params: Record<string, string>,
     signal?: AbortSignal,
   ) {
-    const key = (options.key ?? (() => process.env.STEAM_WEB_API_KEY))();
+    signal?.throwIfAborted();
+    const key = await Promise.resolve()
+      .then(options.key ?? serverSecrets.steam)
+      .catch(() => {
+        throw new SteamError(
+          "Steam credentials are unavailable. Try again shortly.",
+          503,
+        );
+      });
+    signal?.throwIfAborted();
     if (!key)
       throw new SteamError(
-        "Steam import is not configured. Set STEAM_WEB_API_KEY on the server.",
+        "Steam import is not configured on the server.",
         503,
       );
     const url = new URL(`https://api.steampowered.com/${path}/v1/`);

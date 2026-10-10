@@ -1,5 +1,5 @@
 // Node-only provider client. Import only from API routes/server code.
-import process from "node:process";
+import { serverSecrets } from "./server-secrets";
 import { z } from "zod";
 import { updateGameSchema } from "./game";
 import { igdbGameSchema, type IgdbGame } from "./igdb";
@@ -129,18 +129,15 @@ const searchFields =
 const fields =
   "fields name,first_release_date,release_dates.date,release_dates.date_format.format,cover.image_id,genres.name,platforms.name,involved_companies.company.name,involved_companies.developer,involved_companies.publisher,summary,storyline,screenshots.image_id;";
 type Options = {
-  credentials?: () => { clientId?: string; clientSecret?: string };
+  credentials?: () =>
+    | { clientId?: string; clientSecret?: string }
+    | Promise<{ clientId?: string; clientSecret?: string }>;
   fetch?: typeof fetch;
   now?: () => number;
   wait?: (ms: number) => Promise<void>;
 };
 export function createIgdbClient(options: Options = {}) {
-  const credentials =
-    options.credentials ??
-    (() => ({
-      clientId: process.env.IGDB_CLIENT_ID,
-      clientSecret: process.env.IGDB_CLIENT_SECRET,
-    }));
+  const credentials = options.credentials ?? serverSecrets.igdb;
   const fetcher = options.fetch ?? fetch;
   const now = options.now ?? Date.now;
   const wait =
@@ -252,7 +249,15 @@ export function createIgdbClient(options: Options = {}) {
     normalize: (data: unknown) => unknown = normalizeIgdbGames,
   ): Promise<unknown> {
     signal?.throwIfAborted();
-    const { clientId, clientSecret } = credentials();
+    const { clientId, clientSecret } = await Promise.resolve()
+      .then(credentials)
+      .catch(() => {
+        throw new IgdbError(
+          "Game search credentials are unavailable. Try again or continue manually.",
+          503,
+        );
+      });
+    signal?.throwIfAborted();
     if (!clientId || !clientSecret)
       throw new IgdbError(
         "Game search is not configured. Continue manually.",

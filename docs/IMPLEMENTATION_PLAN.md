@@ -40,7 +40,7 @@ UI refinement includes stable search/viewer dimensions, unclipped focus outlines
 
 ### Setup and manual validation
 
-1. Configure server-only Twitch application credentials as before. No Steam credentials are required for IGDB autofill.
+1. Configure server-only Twitch application credentials through Secrets Manager on EC2 or `.env` locally. No Steam credentials are required for IGDB autofill.
 2. Run `npm run db:deploy` to apply the additive IGDB identity migration; it preserves existing data. Rebuild/restart the application after deploying the new code.
 3. Add a game via one-character search, preview and Continue. Select platform chips, edit prose, reorder/remove screenshots, navigate Back and save/reload. Confirm the IGDB identity persists.
 4. Update a linked game after changing its local title. Confirm direct-ID retrieval, empty default, mode changes/manual choices, Tags union, screenshot/company replacement and uploaded-cover retirement only after Save. For a legacy game, select a search match explicitly.
@@ -54,11 +54,17 @@ Local verification includes account/URL validation, inaccessible/empty libraries
 
 ### Setup and remaining live validation
 
-1. Set `STEAM_WEB_API_KEY` on the server using a user Web API key from Steam's API-key registration page. Keep existing `IGDB_CLIENT_ID` and `IGDB_CLIENT_SECRET` for enrichment; Steam-only import remains available without IGDB. No `NEXT_PUBLIC_` keys or Steam account environment variable are used.
+1. Configure `STEAM_WEB_API_KEY` through Secrets Manager on EC2 or `.env` locally. Configure `IGDB_CLIENT_ID` and `IGDB_CLIENT_SECRET` through the same source for enrichment; Steam-only import remains available without IGDB. No `NEXT_PUBLIC_` keys or Steam account environment variable are used.
 2. Apply `npm run db:deploy`, rebuild and restart. `npm run dev` applies migrations automatically; production start does not.
 3. Enter your profile URL/ID64 with public game details. Import a selection and verify Steam identity, metadata, chosen Status and default platform after reload. Reopen Import Steam to verify automatic account loading; exercise Change account and Forget account.
 4. Repeat import after acquiring a game or accumulating playtime. Verify new selection, explicit playtime replacement, personal-field preservation and no duplicates.
 5. Verify unavailable game details and a real IGDB App ID match in the deployed environment. These live checks remain pending.
+
+## Secrets Manager integration
+
+Implemented lazy role-based retrieval of both provider secrets in `us-east-1`, a shared five-minute memory cache, concurrent-read deduplication, validated JSON and safe 503 failures. Local environment support is retained with explicit source selection for local production tests. The EC2 PM2 configuration selects AWS; an IAM policy template and [deployment instructions](../deploy/README.md#6-provider-secrets) are included. No database migration is required for this integration.
+
+On 2026-10-10, validation passed 34 unit/integration tests, 23 Chromium E2E tests, lint, typecheck, production build and `git diff --check`. Credential tests cover local source selection, production precedence, secret names, caching/expiry, concurrent reads, malformed/missing values, retry after failure, provider error sanitization and IGDB token renewal after secret rotation. Live EC2 role access, Secrets Manager reads and real-provider behavior remain pending.
 
 ## Phase 10
 
