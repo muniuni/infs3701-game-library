@@ -1,4 +1,8 @@
 import { test, expect } from "@playwright/test";
+test.beforeEach(async ({ page }) => {
+  page.on("dialog", (dialog) => dialog.accept());
+});
+
 test("API validates input and shares records across collection and item routes", async ({
   request,
 }) => {
@@ -55,12 +59,18 @@ test("create, edit, search, all views, drag, rollback, confirmation and mobile l
     .getByRole("button", { name: "Add Game", exact: true })
     .first()
     .click();
+  await page.getByRole("button", { name: "Add manually", exact: true }).click();
   await page.getByLabel("Title", { exact: false }).last().fill("UI fixture");
   await page.getByLabel("Platforms", { exact: true }).fill("PC, Switch");
   await page.getByLabel("Tags", { exact: true }).fill("Puzzle, Favourite");
   await page.getByLabel("Playtime hours").fill("2");
   await page.getByLabel("Playtime minutes").fill("15");
-  await page.getByRole("button", { name: "Create game" }).click();
+  await page.getByRole("button", { name: "Add game" }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await page
+    .locator(".game-card-open")
+    .filter({ hasText: /UI fixture|Refinement token fixture/ })
+    .click();
   await expect(
     page.getByRole("dialog").getByText("2h 15m", { exact: true }),
   ).toBeVisible();
@@ -70,7 +80,19 @@ test("create, edit, search, all views, drag, rollback, confirmation and mobile l
   });
   await page.getByRole("button", { name: "Edit", exact: true }).click();
   await page.getByLabel("Review", { exact: true }).fill("A memorable game.");
+  const savedTitle1 = await page
+    .getByLabel("Title", { exact: true })
+    .inputValue();
   await page.getByRole("button", { name: "Save changes" }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await page
+    .locator(".game-card-open, .kanban-open, .list-row")
+    .filter({ hasText: savedTitle1 })
+    .first()
+    .click();
+  await expect(
+    page.getByRole("button", { name: "Edit", exact: true }),
+  ).toBeVisible();
   await expect(page.getByText("A memorable game.")).toBeVisible();
   await page.keyboard.press("Escape");
   await page.getByRole("textbox", { name: "Search titles" }).fill("UI fixture");
@@ -121,6 +143,9 @@ test("create, edit, search, all views, drag, rollback, confirmation and mobile l
   await expect(page.getByRole("dialog")).toBeVisible();
   await page.getByRole("button", { name: "Delete", exact: true }).click();
   await page.getByRole("button", { name: "Keep game" }).click();
+  await expect(
+    page.getByRole("button", { name: "Edit", exact: true }),
+  ).toBeVisible();
   await expect(page.getByText("A memorable game.")).toBeVisible();
   await page.getByRole("button", { name: "Delete", exact: true }).click();
   await page.getByRole("button", { name: "Delete game", exact: true }).click();
@@ -224,6 +249,9 @@ test("sidebar filters, token entry and cover preview", async ({
       .first()
       .click();
     await page
+      .getByRole("button", { name: "Add manually", exact: true })
+      .click();
+    await page
       .getByLabel("Title", { exact: false })
       .last()
       .fill("Refinement token fixture");
@@ -255,18 +283,7 @@ test("sidebar filters, token entry and cover preview", async ({
     await page.getByRole("option", { name: "Playing", exact: true }).click();
 
     const formCover = await page.locator(".form-cover-preview").boundingBox();
-    const titleInput = await page
-      .getByLabel("Title", { exact: true })
-      .boundingBox();
-    const statusInput = await page
-      .getByRole("combobox", { name: "Status", exact: true })
-      .boundingBox();
-    expect(formCover!.width / formCover!.height).toBeCloseTo(4 / 3, 2);
-    expect(formCover!.y).toBeCloseTo(titleInput!.y, 0);
-    expect(formCover!.y + formCover!.height).toBeCloseTo(
-      statusInput!.y + statusInput!.height,
-      0,
-    );
+    expect(formCover!.width / formCover!.height).toBeCloseTo(3 / 4, 2);
     await expect(
       page.getByRole("button", { name: "Image URL", exact: true }),
     ).toHaveCount(0);
@@ -280,7 +297,16 @@ test("sidebar filters, token entry and cover preview", async ({
       path: "test-results/refined-form.png",
       fullPage: true,
     });
-    await page.getByRole("button", { name: "Create game" }).click();
+    await page.getByRole("button", { name: "Add game" }).click();
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await page.getByLabel("Search titles").fill("");
+    await sidebar
+      .getByRole("button", { name: "All platforms", exact: true })
+      .click();
+    await page
+      .locator(".kanban-open")
+      .filter({ hasText: "Refinement token fixture" })
+      .click();
     await expect(
       page.getByRole("dialog").getByText("Switch", { exact: true }),
     ).toBeVisible();
@@ -290,7 +316,7 @@ test("sidebar filters, token entry and cover preview", async ({
     await expect(page.locator(".rating-stars .star-filled")).toHaveCount(8);
     await page.screenshot({ path: "test-results/star-rating-details.png" });
     const detailCover = await page.locator(".detail-cover").boundingBox();
-    expect(detailCover!.width / detailCover!.height).toBeCloseTo(4 / 3, 2);
+    expect(detailCover!.width / detailCover!.height).toBeCloseTo(3 / 4, 2);
     const saved = (await (await request.get("/api/games")).json()).find(
       (game: { title: string }) => game.title === "Refinement token fixture",
     );
@@ -313,7 +339,7 @@ test("sidebar filters, token entry and cover preview", async ({
       .getByRole("button", { name: "Clear rating", exact: true })
       .click();
     await page.setViewportSize({ width: 390, height: 700 });
-    await page.locator(".form-fields").evaluate((el) => {
+    await page.locator(".game-form-shell").evaluate((el) => {
       el.scrollTop = 0;
     });
     await expect(
@@ -322,14 +348,14 @@ test("sidebar filters, token entry and cover preview", async ({
     await expect(
       page.getByRole("button", { name: "Save changes", exact: true }),
     ).toBeInViewport();
-    await page.locator(".form-fields").evaluate((el) => {
+    await page.locator(".game-form-shell").evaluate((el) => {
       el.scrollTop = el.scrollHeight;
     });
     await expect(
       page.getByRole("button", { name: "Save changes", exact: true }),
     ).toBeInViewport();
     expect(
-      await page.locator(".form-fields").evaluate((el) => el.scrollTop),
+      await page.locator(".game-form-shell").evaluate((el) => el.scrollTop),
     ).toBeGreaterThan(0);
     const fieldsBox = await page.locator(".form-fields").boundingBox();
     const footerBox = await page.locator(".form-actions").boundingBox();
@@ -337,8 +363,17 @@ test("sidebar filters, token entry and cover preview", async ({
       footerBox!.y + 1,
     );
     await page.screenshot({ path: "test-results/mobile-edit-form.png" });
+    const savedTitle2 = await page
+      .getByLabel("Title", { exact: true })
+      .inputValue();
     await page
       .getByRole("button", { name: "Save changes", exact: true })
+      .click();
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await page
+      .locator(".game-card-open, .kanban-open, .list-row")
+      .filter({ hasText: savedTitle2 })
+      .first()
       .click();
     await expect(
       page.getByRole("img", { name: "Not rated", exact: true }),
@@ -437,11 +472,12 @@ test("filter recovery, narrow layouts and visible form validation", async ({
       .getByRole("button", { name: "Add Game", exact: true })
       .first()
       .click();
+    await page
+      .getByRole("button", { name: "Add manually", exact: true })
+      .click();
     await page.getByLabel("Title", { exact: true }).fill("   ");
 
-    await page
-      .getByRole("button", { name: "Create game", exact: true })
-      .click();
+    await page.getByRole("button", { name: "Add game", exact: true }).click();
     await expect(page.locator(".game-form [role=alert]")).toBeFocused();
     await expect(page.locator(".game-form [role=alert]")).toBeInViewport();
     await expect(
@@ -449,6 +485,7 @@ test("filter recovery, narrow layouts and visible form validation", async ({
     ).toBeInViewport();
     await page.screenshot({ path: "test-results/mobile-validation.png" });
     await page.getByRole("button", { name: "Cancel", exact: true }).click();
+    await page.getByRole("button", { name: "Discard", exact: true }).click();
     await expect(page.getByRole("dialog")).toHaveCount(0);
   } finally {
     await request.delete(`/api/games/${game.id}`);
@@ -472,6 +509,7 @@ test("uploaded cover preview, save, unchanged edit, replacement and failed-save 
     .locator("header")
     .getByRole("button", { name: "Add Game", exact: true })
     .click();
+  await page.getByRole("button", { name: "Add manually", exact: true }).click();
   await page.getByLabel("Title", { exact: true }).fill(title);
   await expect(page.locator(".cover-controls")).toHaveCount(0);
   await expect(page.getByLabel("Cover URL")).toHaveCount(0);
@@ -482,7 +520,7 @@ test("uploaded cover preview, save, unchanged edit, replacement and failed-save 
     buffer: Buffer.from("not an image"),
   });
   await expect(page.getByRole("alert")).toHaveText(
-    "Choose a JPEG, PNG or WebP image.",
+    "Choose one JPEG, PNG or WebP image up to 5 MB.",
   );
   await page
     .getByLabel("Upload cover image", { exact: true })
@@ -533,10 +571,12 @@ test("uploaded cover preview, save, unchanged edit, replacement and failed-save 
       });
     } else await route.continue();
   });
-  await page.getByRole("button", { name: "Create game", exact: true }).click();
+  await page.getByRole("button", { name: "Add game", exact: true }).click();
   await expect(page.getByRole("alert")).toContainText("Temporary save failure");
   await page.unroute("**/api/games");
-  await page.getByRole("button", { name: "Create game", exact: true }).click();
+  await page.getByRole("button", { name: "Add game", exact: true }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await page.locator(".game-card-open").filter({ hasText: title }).click();
   await expect(
     page.getByRole("button", { name: "Edit", exact: true }),
   ).toBeVisible();
@@ -548,7 +588,16 @@ test("uploaded cover preview, save, unchanged edit, replacement and failed-save 
   expect(cover.headers()["content-type"]).toBe("image/png");
   await page.getByRole("button", { name: "Edit", exact: true }).click();
   await page.getByLabel("Title", { exact: true }).fill(`${title} edited`);
+  const savedTitle3 = await page
+    .getByLabel("Title", { exact: true })
+    .inputValue();
   await page.getByRole("button", { name: "Save changes", exact: true }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await page
+    .locator(".game-card-open, .kanban-open, .list-row")
+    .filter({ hasText: savedTitle3 })
+    .first()
+    .click();
   await expect(
     page.getByRole("button", { name: "Edit", exact: true }),
   ).toBeVisible();
@@ -563,16 +612,27 @@ test("uploaded cover preview, save, unchanged edit, replacement and failed-save 
     buffer: image,
   });
   await page.getByRole("button", { name: "Cancel", exact: true }).click();
+  await page.getByRole("button", { name: "Discard", exact: true }).click();
   expect(
     (await (await request.get(`/api/games/${game.id}`)).json()).cover,
   ).toEqual(game.cover);
+  await page.locator(".game-card-open").filter({ hasText: title }).click();
   await page.getByRole("button", { name: "Edit", exact: true }).click();
   await page.getByLabel("Upload cover image", { exact: true }).setInputFiles({
     name: "replacement.png",
     mimeType: "image/png",
     buffer: image,
   });
+  const savedTitle4 = await page
+    .getByLabel("Title", { exact: true })
+    .inputValue();
   await page.getByRole("button", { name: "Save changes", exact: true }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await page
+    .locator(".game-card-open, .kanban-open, .list-row")
+    .filter({ hasText: savedTitle4 })
+    .first()
+    .click();
   await expect(
     page.getByRole("button", { name: "Edit", exact: true }),
   ).toBeVisible();
@@ -600,6 +660,9 @@ test("label suggestions, visible feedback and quick status changes", async ({
     await page
       .locator("header")
       .getByRole("button", { name: "Add Game", exact: true })
+      .click();
+    await page
+      .getByRole("button", { name: "Add manually", exact: true })
       .click();
     await page.getByLabel("Title", { exact: true }).fill(title);
     await page
@@ -646,9 +709,7 @@ test("label suggestions, visible feedback and quick status changes", async ({
     await tags.fill("pu");
     await page.screenshot({ path: "test-results/tag-suggestions.png" });
     await page.getByRole("option", { name: "Puzzle", exact: true }).click();
-    await page
-      .getByRole("button", { name: "Create game", exact: true })
-      .click();
+    await page.getByRole("button", { name: "Add game", exact: true }).click();
     await expect(page.getByRole("status")).toHaveText(`${title} saved.`);
     const created = (await (await request.get("/api/games")).json()).find(
       (game: { title: string }) => game.title === title,
@@ -656,7 +717,7 @@ test("label suggestions, visible feedback and quick status changes", async ({
     createdId = created.id;
     expect(created.platforms).toEqual(["PC", "Steam Deck"]);
     expect(created.tags).toEqual(["Cooperative", "Cozy", "Puzzle"]);
-    await page.getByRole("button", { name: "Close", exact: true }).click();
+    await expect(page.getByRole("dialog")).toHaveCount(0);
     await page.getByRole("textbox", { name: "Search titles" }).fill(title);
     const status = page.getByRole("combobox", {
       name: `Change ${title} status`,

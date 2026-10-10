@@ -41,12 +41,16 @@ async function setup() {
   const connect = () =>
     new PrismaClient({ adapter: new PrismaBetterSqlite3({ url }) });
   const db = connect();
-  const migration = await readFile(
-    "prisma/migrations/20260930000000_initial/migration.sql",
-    "utf8",
-  );
-  for (const sql of migration.split(";").filter((sql) => sql.trim()))
-    await db.$executeRawUnsafe(sql);
+  for (const directory of (await readdir("prisma/migrations"))
+    .filter((name) => /^\d/.test(name))
+    .sort()) {
+    const migration = await readFile(
+      `prisma/migrations/${directory}/migration.sql`,
+      "utf8",
+    );
+    for (const sql of migration.split(";").filter((sql) => sql.trim()))
+      await db.$executeRawUnsafe(sql);
+  }
   const storage = new FakeStorage();
   return {
     db,
@@ -254,6 +258,50 @@ test("SQLite saves, failed saves, replacements and deletion manage local cover f
     await next.deleteGame(game.id);
     assert.deepEqual(await readdir(covers), []);
     assert.equal(await db.coverObject.count(), 0);
+  } finally {
+    await db.$disconnect();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("IGDB identity and expanded metadata persist, reject duplicate links and preserve old records", async () => {
+  const { db, repo, connect, storage, directory } = await setup();
+  try {
+    const legacy = await repo.createGame(input("Legacy"));
+    assert.equal(legacy.igdbId, undefined);
+    const saved = await repo.updateGame(legacy.id, {
+      igdbId: 777,
+      availablePlatforms: [{ id: 6, name: "PC" }],
+      developers: ["Studio"],
+      publishers: ["Publisher"],
+      summary: "概要".repeat(1000),
+      storyline: "Story",
+      screenshots: [{ imageId: "screenshot_1" }],
+    });
+    assert.equal(saved?.igdbId, 777);
+    await assert.rejects(
+      repo.createGame({ ...input("Different title"), igdbId: 777 }),
+      (error) =>
+        error instanceof DuplicateGameError && error.message.includes("IGDB"),
+    );
+    const other = await repo.createGame(input("Other"));
+    await assert.rejects(
+      repo.updateGame(other.id, { igdbId: 777 }),
+      DuplicateGameError,
+    );
+    await db.$disconnect();
+    const reopened = connect();
+    try {
+      const persisted = await new SqliteGameRepository(
+        reopened,
+        storage,
+      ).getGame(legacy.id);
+      assert.deepEqual(persisted?.screenshots, [{ imageId: "screenshot_1" }]);
+      assert.equal(persisted?.summary, "概要".repeat(1000));
+      assert.equal(persisted?.igdbId, 777);
+    } finally {
+      await reopened.$disconnect();
+    }
   } finally {
     await db.$disconnect();
     await rm(directory, { recursive: true, force: true });

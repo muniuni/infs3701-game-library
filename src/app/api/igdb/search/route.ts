@@ -4,7 +4,10 @@ export const dynamic = "force-dynamic";
 export async function GET(request: Request) {
   try {
     return Response.json(
-      await igdbClient.search(new URL(request.url).searchParams.get("q") ?? ""),
+      await igdbClient.search(
+        new URL(request.url).searchParams.get("q") ?? "",
+        request.signal,
+      ),
       { headers: { "Cache-Control": "no-store" } },
     );
   } catch (error) {

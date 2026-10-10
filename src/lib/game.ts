@@ -11,6 +11,13 @@ export type Cover =
   { type: "upload" | "url" | "api"; url: string } | { type: "placeholder" };
 export type Game = {
   id: string;
+  igdbId?: number;
+  availablePlatforms?: { id: number; name: string }[];
+  developers?: string[];
+  publishers?: string[];
+  summary?: string;
+  storyline?: string;
+  screenshots?: { imageId: string }[];
   title: string;
   platforms: string[];
   tags: string[];
@@ -52,7 +59,39 @@ const isoDate = z
     );
   }, "Enter a valid calendar date.");
 // Upload references are server-owned and can only be created through multipart saves.
+export const platformSchema = z
+  .object({
+    id: z.number().int().positive().safe(),
+    name: z.string().trim().min(1).max(120),
+  })
+  .strict();
+export const screenshotSchema = z
+  .object({
+    imageId: z
+      .string()
+      .regex(/^[A-Za-z0-9_]+$/)
+      .max(120),
+  })
+  .strict();
+const companies = z
+  .array(z.string().trim().min(1).max(160))
+  .max(50)
+  .transform((values) =>
+    values.filter(
+      (value, index) =>
+        values.findIndex(
+          (other) => other.toLowerCase() === value.toLowerCase(),
+        ) === index,
+    ),
+  );
 const fields = {
+  igdbId: z.number().int().positive().safe().nullable().optional(),
+  availablePlatforms: z.array(platformSchema).max(100).optional(),
+  developers: companies.optional(),
+  publishers: companies.optional(),
+  summary: z.string().trim().max(20000).nullable().optional(),
+  storyline: z.string().trim().max(20000).nullable().optional(),
+  screenshots: z.array(screenshotSchema).max(30).optional(),
   title: z.string().trim().min(1, "Title is required.").max(160),
   platforms: labels,
   tags: labels,

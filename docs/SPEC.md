@@ -4,7 +4,7 @@
 
 Single-user game library with no authentication. Prisma/SQLite persistence and local/S3 cover storage are implemented. Phase 7 EC2 deployment and Phase 8 cloud deployment/validation are complete, owner-confirmed. Phase 9 IGDB autofill is implemented and locally validated; live-provider/deployment validation remains pending. Steam library import remains planned. Assignment extensions are not implemented.
 
-New databases start empty, retain records across application restarts and do not automatically load the fictional fixtures. Local storage remembers IGDB field-selection preferences only; library view/filter settings remain temporary. Steam will have a separate preference set when implemented.
+New databases start empty, retain records across application restarts and do not automatically load the fictional fixtures. IGDB update modes and field selections are temporary dialog state. Library view/filter settings remain temporary. Steam will have its own preferences when implemented.
 
 ## Data model
 
@@ -20,9 +20,14 @@ Types and validation are defined in `src/lib/game.ts`.
 | `playtimeMinutes`              | Optional non-negative safe integer, entered/displayed as hours and minutes                                  |
 | `rating`                       | Optional integer, 1–10                                                                                      |
 | `review`                       | Optional trimmed text, up to 10,000 characters                                                              |
+| `igdbId`                       | Optional positive integer, unique across linked games; saved with the game draft                             |
+| `availablePlatforms`           | Up to 100 provider platform ID/name pairs; distinct from selected `platforms`                               |
+| `developers`, `publishers`     | Optional arrays, up to 50 names of 160 characters each                                                      |
+| `summary`, `storyline`         | Optional separate trimmed texts, up to 20,000 characters each; unrelated to personal Review                 |
+| `screenshots`                  | Optional ordered array of up to 30 validated IGDB image IDs                                                 |
 | `cover`                        | Placeholder (default), HTTP/HTTPS URL up to 2,048 characters, or server-created upload reference            |
 
-Title identity uses NFKC normalization, collapsed whitespace and lowercase. Duplicate titles are rejected regardless of platform; edit the existing game's platforms instead. PATCH accepts `null` to clear release date, playtime, rating and review. Upload references cannot be supplied through JSON; the reserved `api` cover type is also rejected.
+Title identity uses NFKC normalization, collapsed whitespace and lowercase. Duplicate titles are rejected regardless of platform; edit the existing game's platforms instead. PATCH accepts `null` to clear release date, playtime, rating, review, summary, storyline and IGDB identity. Empty arrays clear collection fields. Upload references cannot be supplied through JSON; the reserved `api` cover type is also rejected.
 
 ## Library behavior
 
@@ -30,7 +35,7 @@ Grid, List and five-column Kanban share browser-side search, filters and sorting
 
 Default sort is recently added. Title sorts alphabetically; dates/timestamps sort newest first, rating/playtime highest first. Unset values come last, with title as the tiebreaker. View/search/filter settings reset on page reload.
 
-Add, details, edit and confirmed delete use dialogs. Platform chips and tag autocomplete suggest existing library values while allowing custom entries. Successful saves open details. Grid, List, Kanban and Details offer quick status changes; Kanban also supports dragging. Status changes apply immediately and roll back on failure. Save, delete and status changes show brief success feedback. Loading, empty, no-match, saving and error states include appropriate reload/reset actions.
+Add, details, edit and confirmed delete use dialogs. Platform chips and tag autocomplete suggest existing library values while allowing custom entries. Successful creation returns to the library. Successful editing also returns to the library. Grid, List, Kanban and Details offer quick status changes; Kanban also supports dragging. Status changes apply immediately and roll back on failure. Save, delete and status changes show brief success feedback. Loading, empty, no-match, saving and error states include appropriate reload/reset actions.
 
 ## Covers and storage
 
@@ -53,17 +58,25 @@ Phase 8 completion was confirmed by the owner on 2026-10-02. See the [deployment
 
 ## Phase 9 IGDB autofill (implemented)
 
-IGDB search in Add/Edit proposes only title, release date, cover and genres. Genres use the existing `tags` field and its validation/filtering; no separate genre field is added. IGDB does not supply platforms, status, personal rating, review or playtime. Release date uses the first release date only when IGDB supplies a complete calendar date; partial dates stay unset. Covers use HTTPS IGDB image URLs through the existing `url` cover type, without downloading into local/S3 storage.
+IGDB supplies title, complete first release date, cover, genres mapped to Tags, available platforms, developer/publisher names, summary, storyline and screenshots. Personal platform selections, status, rating, review and playtime are never inferred. Partial release dates remain unset. Covers and screenshots use HTTPS IGDB URLs without copying image bytes into local/S3 storage.
 
-**Add Game:** Title is an accessible autocomplete entry point. A trimmed query of at least three characters searches after a 300 ms debounce. Suggestions show cover, title and release year, support keyboard/mouse selection and can be dismissed while retaining manual text. Query changes cancel stale browser requests; outdated responses never change the draft. Selecting a result immediately applies available enabled fields, without confirmation. Suggestions scroll with trackpad/wheel input within the modal; no manual-search action or result-count message is shown.
+**Add:** One dialog contains search, game preview and editable form. Nonblank title input searches after 150 ms, with IME composition suppression, explicit Search/Enter, keyboard result selection and stale request cancellation. Add manually carries the query into Title and remains available during provider failure. Selecting a result fetches its details and shows a preview; Continue fills the draft. The large cover and Title precede Status, Platforms, Playtime, Rating, Review and Tags. Release date, developers/publishers, prose and screenshots follow. The order stays stable while typing. Returning from the form preserves its state; selecting/continuing from a preview again opens comparison before overwriting anything. Search query/results/scroll survive Back from the preview.
 
-Create autofill may replace title and release date. Genres merge into Tags, preserving existing spelling/order and deduplicating case-insensitively; existing manual tags take priority within the 30-label limit. A selected upload always takes precedence. IGDB covers may replace a placeholder or external URL. All values remain editable, and only Create commits them.
+**Platforms:** Available provider platforms are selectable chips, initially unselected. Existing selections remain even if absent from refreshed provider options. Without provider options, manual platform entry and library suggestions remain available. Selected platforms continue to drive library display/filtering.
 
-**Edit Game:** Title editing never automatically queries IGDB. Autofill beside Title opens search/results immediately using the draft title, then debounces search as its query changes. No Search button is required. Outside clicks, Escape and closing the search view return to the draft. Available differing fields start checked, including populated replacements. Identical or unavailable values are omitted from changes. Selecting genres in Edit appends new genres, preserving and deduplicating existing Tags, and a cover may replace an upload only when checked. Apply selected updates the draft; Save is the only commit.
+**Edit:** Update metadata above the game information fetches the saved IGDB ID directly. Unlinked legacy/manual games search by draft title and require explicit result selection. Find another game opens the shared search screen. No title-only automatic matching/linking occurs. Titles can be edited without changing identity. Metadata and identity remain draft-only until Save.
 
-Autofill fields provides lightweight Create preference checkboxes for title, release date, cover and genres. The existing versioned IGDB localStorage preferences are reused, defaulting to all enabled when absent/invalid/unavailable. Edit comparison choices also update stored field preferences, but each Edit comparison initializes available changes checked. Persist only field choices, never results, draft values, provider IDs or source/synchronization state.
+**Comparison:** Read-only Field/Before/After table. Before uses current draft values. After shows the available proposal even on excluded rows. Changed text uses red deletion/green insertion marks, added tags are highlighted, and changed images have colored borders. Excluded rows dim. Cancel opens the shared unsaved-change confirmation when a draft or pending proposal differs. The orange split button applies its selected mode; changing the menu only changes the selection/diff presentation.
 
-Create application shows a floating “Autofilled X fields · Undo” notice, counting changed fields. Undo restores the changed metadata from immediately before the latest autofill while leaving unrelated fields intact. It lasts about ten seconds of unpaused time, pausing on hover or keyboard focus. A later autofill supersedes the snapshot; Create/Save or dialog close clears it. Snapshot/upload state is temporary in-dialog state only. Cancel writes nothing. Manual entry, validation, uploads and retry remain available during provider failure.
+- Update if empty is the default on every new update session. It fills only empty strings, empty arrays or a placeholder cover.
+- Replace current data replaces supplied differing metadata, including uploaded covers and screenshot/company lists. Tags use a case-insensitive union retaining existing spelling/order.
+- Select manually reveals field checkboxes. First entry copies the preceding mode's eligible selection. Choices survive mode switches in that comparison and reset when another game is selected. Unavailable/identical fields cannot be checked.
+- Missing/empty provider values never clear current fields. A Tags union above 30 blocks application until Tags is deselected or existing tags are reduced; no silent truncation.
+- Applying also confirms the chosen IGDB identity and refreshes available platform options. Identity-only linking is permitted. Discard confirms neither. Selected platforms and personal fields stay unchanged.
+
+Summary/storyline remain editable independently of Review. Screenshots support expansion, removal and reordering, not manual image uploads. Details show companies, summary, collapsible storyline and the gallery. No filled-source badges, changed-field counters, instructional banners, timed Undo or persisted IGDB field preferences remain. Cancel, outside click, Escape and Close dismiss unchanged forms immediately. Changed drafts show Save and close, Discard and Keep editing. Confirmed comparison saves use the current mode. Nested viewers and selection menus close independently. Invalid input keeps the form open. Back preserves creation input; edit Back uses the same unsaved-change confirmation. Successful creation returns to the library. Failed saves retain values/uploads for retry.
+
+The additive SQLite migration adds a nullable unique IGDB ID without deleting existing data. Legacy JSON fields default to empty in the form; legacy identity remains unlinked. Title and IGDB identity conflicts are reported separately.
 
 ## Phase 9 Steam import (planned, not implemented)
 
@@ -73,9 +86,9 @@ The import preview allows game selection and field selection per game. New games
 
 For existing games, imports propose missing metadata and permit explicit replacement of populated metadata through unchecked checkboxes. Steam playtime is a replacement proposal, not added to existing playtime: current totals may include non-Steam playtime. Missing playtime initially defaults checked; differing existing playtime always starts unchecked, regardless of saved preferences. No status is inferred from playtime. Status, rating and review are never overwritten by import.
 
-IGDB field-selection preferences persist across browser sessions; Steam will use a separate preference set. Store only field choices, not account input, credentials, preview data or individual game selections. Preferences initialize each new confirmation; row-specific overrides affect that preview only. Replacement safeguards take precedence over remembered defaults. Invalid or unavailable local storage falls back to initial defaults.
+Steam will persist its own field-selection preferences; current IGDB modes are temporary. Store only field choices, not account input, credentials, preview data or individual game selections. Preferences initialize each new confirmation; row-specific overrides affect that preview only. Replacement safeguards take precedence over remembered defaults. Invalid or unavailable local storage falls back to initial defaults.
 
-The Steam implementation will persist optional IGDB and Steam App IDs for repeat-import matching. IGDB autofill currently saves only approved metadata through existing CRUD, without provider identity columns or a database migration. Match stored identifiers first, then the existing normalized-title rule; title uniqueness remains enforced. Conflicting identifiers or multiple candidate records require explicit resolution or skipping in the preview. Confirmed imports may link an existing record without changing its metadata. Repeat imports do not create duplicate records. Each selected game saves independently and reports success or failure; retry retains failed selections and excludes successful rows. Cancel before confirmation writes no games or covers. Provider failures preserve manual workflows and allow retry or Steam-only import when Steam data is available.
+IGDB identity is already persisted with a unique nullable column. Steam will add a Steam App ID for repeat-import matching. Match stored identifiers first, then the existing normalized-title rule; title uniqueness remains enforced. Conflicting identifiers or multiple candidate records require explicit resolution or skipping in the preview. Confirmed imports may link an existing record without changing its metadata. Repeat imports do not create duplicate records. Each selected game saves independently and reports success or failure; retry retains failed selections and excludes successful rows. Cancel before confirmation writes no games or covers. Provider failures preserve manual workflows and allow retry or Steam-only import when Steam data is available.
 
 ## Out of scope
 

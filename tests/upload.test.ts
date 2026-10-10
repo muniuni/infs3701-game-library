@@ -77,7 +77,7 @@ test("multipart and JSON requests enforce streamed limits and reject extra parts
   );
   const body = new ReadableStream({
     start(controller) {
-      controller.enqueue(new Uint8Array(65 * 1024));
+      controller.enqueue(new Uint8Array(513 * 1024));
       controller.close();
     },
   });
@@ -91,4 +91,20 @@ test("multipart and JSON requests enforce streamed limits and reject extra parts
     ),
     (error: unknown) => error instanceof UploadError && error.status === 413,
   );
+});
+
+test("metadata allowance accepts bounded Unicode prose without a cover upload", async () => {
+  const input = {
+    title: "Unicode fixture",
+    summary: "あ".repeat(20000),
+    storyline: "文".repeat(20000),
+    review: "記".repeat(10000),
+  };
+  const parsed = await readMutation(
+    new Request("http://localhost", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+  );
+  assert.deepEqual(parsed.input, input);
 });

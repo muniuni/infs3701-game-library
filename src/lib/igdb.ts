@@ -1,20 +1,35 @@
 import { z } from "zod";
-import { updateGameSchema, type Cover } from "./game";
+import {
+  updateGameSchema,
+  platformSchema,
+  screenshotSchema,
+  type Cover,
+} from "./game";
 
 export const metadataFields = [
   "title",
   "releaseDate",
   "cover",
   "tags",
+  "developers",
+  "publishers",
+  "summary",
+  "storyline",
+  "screenshots",
 ] as const;
 export type MetadataField = (typeof metadataFields)[number];
-export type MetadataPreferences = Record<MetadataField, boolean>;
-export const igdbPreferenceKey = "game-library.igdb-fields.v1";
-export const defaultMetadataPreferences: MetadataPreferences = {
-  title: true,
-  releaseDate: true,
-  cover: true,
-  tags: true,
+export type MetadataMode = "empty" | "replace" | "manual";
+export type MetadataChoices = Record<MetadataField, boolean>;
+export const metadataLabels: Record<MetadataField, string> = {
+  title: "Title",
+  releaseDate: "Release date",
+  cover: "Cover",
+  tags: "Tags",
+  developers: "Developers",
+  publishers: "Publishers",
+  summary: "Summary",
+  storyline: "Storyline",
+  screenshots: "Screenshots",
 };
 export const igdbGameSchema = z
   .object({
@@ -23,13 +38,24 @@ export const igdbGameSchema = z
     releaseYear: z.number().int().optional(),
     releaseDate: z.string().optional(),
     cover: z
-      .object({ type: z.literal("url"), url: z.string().url() })
+      .object({
+        type: z.literal("url"),
+        url: z
+          .string()
+          .url()
+          .refine((url) => /^https:\/\/images\.igdb\.com\//.test(url)),
+      })
       .optional(),
     tags: z.array(z.string()).optional(),
+    availablePlatforms: z.array(platformSchema).max(100).optional(),
+    developers: z.array(z.string()).optional(),
+    publishers: z.array(z.string()).optional(),
+    summary: z.string().max(20000).optional(),
+    storyline: z.string().max(20000).optional(),
+    screenshots: z.array(screenshotSchema).max(30).optional(),
   })
   .strict()
-  .superRefine((game, context) => {
-    const { id, releaseYear, ...input } = game;
+  .superRefine(({ id, releaseYear, ...input }, context) => {
     void id;
     void releaseYear;
     if (!updateGameSchema.safeParse(input).success)
@@ -37,85 +63,74 @@ export const igdbGameSchema = z
   });
 export type IgdbGame = z.infer<typeof igdbGameSchema>;
 export type MetadataDraft = {
+  availablePlatforms?: { id: number; name: string }[];
   title: string;
   releaseDate: string;
-  tags: string[];
   cover: Cover;
+  tags: string[];
+  developers: string[];
+  publishers: string[];
+  summary: string;
+  storyline: string;
+  screenshots: { imageId: string }[];
 };
-export function readMetadataPreferences(
-  value: string | null,
-): MetadataPreferences {
-  try {
-    const parsed = z
-      .object({
-        title: z.boolean(),
-        releaseDate: z.boolean(),
-        cover: z.boolean(),
-        tags: z.boolean(),
-      })
-      .strict()
-      .parse(JSON.parse(value ?? "null"));
-    return parsed;
-  } catch {
-    return { ...defaultMetadataPreferences };
-  }
+export function mergeIgdbTags(tags: string[], genres: string[] = []) {
+  return [...tags, ...genres].filter(
+    (value, index, all) =>
+      all.findIndex((other) => other.toLowerCase() === value.toLowerCase()) ===
+      index,
+  );
 }
-export function metadataChoices(draft: MetadataDraft, proposal: IgdbGame) {
+export function isEmpty(value: unknown) {
+  return (
+    value == null ||
+    (typeof value === "string" && !value.trim()) ||
+    (Array.isArray(value) && !value.length) ||
+    (typeof value === "object" &&
+      "type" in value &&
+      value.type === "placeholder")
+  );
+}
+export function metadataProposal(
+  draft: MetadataDraft,
+  game: IgdbGame,
+): MetadataDraft {
+  const next = { ...draft };
+  for (const field of metadataFields) {
+    const value = game[field];
+    if (!isEmpty(value))
+      Object.assign(next, {
+        [field]:
+          field === "tags" ? mergeIgdbTags(draft.tags, game.tags) : value,
+      });
+  }
+  return next;
+}
+export function metadataChoices(
+  draft: MetadataDraft,
+  game: IgdbGame,
+  mode: Exclude<MetadataMode, "manual">,
+): MetadataChoices {
+  const proposal = metadataProposal(draft, game);
   return Object.fromEntries(
     metadataFields.map((field) => [
       field,
-      metadataChanged(draft, proposal, field),
+      JSON.stringify(draft[field]) !== JSON.stringify(proposal[field]) &&
+        (mode === "replace" || isEmpty(draft[field])),
     ]),
-  ) as MetadataPreferences;
+  ) as MetadataChoices;
 }
-export function mergeIgdbTags(tags: string[], genres: string[] = []) {
-  const merged = [...tags];
-  for (const genre of genres) {
-    if (merged.length >= 30) break;
-    if (!merged.some((tag) => tag.toLowerCase() === genre.toLowerCase()))
-      merged.push(genre);
-  }
-  return merged;
-}
-export function editAutofillProposal(
+export function applyMetadata(
   draft: MetadataDraft,
-  proposal: IgdbGame,
-): IgdbGame {
-  return {
-    ...proposal,
-    tags: proposal.tags ? mergeIgdbTags(draft.tags, proposal.tags) : undefined,
-  };
+  game: IgdbGame,
+  choices: MetadataChoices,
+): MetadataDraft {
+  const proposal = metadataProposal(draft, game);
+  const next = { ...draft };
+  for (const field of metadataFields)
+    if (choices[field]) Object.assign(next, { [field]: proposal[field] });
+  return next;
 }
-export function metadataChanged(
-  draft: MetadataDraft,
-  proposal: IgdbGame,
-  field: MetadataField,
-) {
-  const value = proposal[field];
-  if (value === undefined || (Array.isArray(value) && !value.length))
-    return false;
-  return JSON.stringify(draft[field]) !== JSON.stringify(value);
-}
-
-// Create selection is assistance: merge personal tags and retain manual uploads.
-export function createAutofillDraft(
-  draft: MetadataDraft,
-  proposal: IgdbGame,
-  preferences: MetadataPreferences,
-): { draft: MetadataDraft; changed: MetadataField[] } {
-  const next: MetadataDraft = { ...draft, tags: [...draft.tags] };
-  if (preferences.title) next.title = proposal.title;
-  if (preferences.releaseDate && proposal.releaseDate)
-    next.releaseDate = proposal.releaseDate;
-  if (preferences.cover && proposal.cover && draft.cover.type !== "upload")
-    next.cover = proposal.cover;
-  if (preferences.tags && proposal.tags?.length) {
-    next.tags = mergeIgdbTags(draft.tags, proposal.tags);
-  }
-  return {
-    draft: next,
-    changed: metadataFields.filter(
-      (field) => JSON.stringify(next[field]) !== JSON.stringify(draft[field]),
-    ),
-  };
+export function screenshotUrl(imageId: string, large = false) {
+  return `https://images.igdb.com/igdb/image/upload/${large ? "t_1080p" : "t_screenshot_med"}/${imageId}.jpg`;
 }

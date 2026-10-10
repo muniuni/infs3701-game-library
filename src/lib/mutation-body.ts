@@ -5,7 +5,7 @@ export async function readMutation(request: Request) {
   const multipart = request.headers
     .get("content-type")
     ?.startsWith("multipart/form-data");
-  const limit = multipart ? MAX_COVER_BYTES + 64 * 1024 : 64 * 1024;
+  const limit = multipart ? MAX_COVER_BYTES + 512 * 1024 : 512 * 1024;
   const reader = request.body?.getReader();
   const chunks: Uint8Array[] = [];
   let size = 0;
@@ -18,7 +18,7 @@ export async function readMutation(request: Request) {
         if (size > limit) {
           await reader.cancel();
           throw new UploadError(
-            "Request is too large. Covers must be up to 5 MB.",
+            "Request is too large. Game data must fit within 512 KB and covers within 5 MB.",
             413,
           );
         }

@@ -89,6 +89,7 @@ export class SqliteGameRepository implements GameRepository {
         }
         const data = {
           titleKey: titleKey(game.title),
+          igdbId: game.igdbId ?? null,
           data: json(game),
           coverKey,
         };
@@ -129,7 +130,9 @@ export class SqliteGameRepository implements GameRepository {
         error instanceof Prisma.PrismaClientKnownRequestError &&
         error.code === "P2002"
       )
-        throw new DuplicateGameError();
+        throw new DuplicateGameError(
+          JSON.stringify(error.meta).includes("igdbId") ? "igdb" : "title",
+        );
       throw error;
     }
   }

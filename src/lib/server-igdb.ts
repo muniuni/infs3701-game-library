@@ -37,6 +37,19 @@ const providerGameSchema = z.object({
   release_dates: z.array(releaseSchema).optional(),
   cover: z.object({ image_id: z.string() }).optional(),
   genres: z.array(z.object({ name: z.string() })).optional(),
+  platforms: z.array(z.object({ id: z.number(), name: z.string() })).optional(),
+  involved_companies: z
+    .array(
+      z.object({
+        company: z.object({ name: z.string() }),
+        developer: z.boolean().optional(),
+        publisher: z.boolean().optional(),
+      }),
+    )
+    .optional(),
+  summary: z.string().optional(),
+  storyline: z.string().optional(),
+  screenshots: z.array(z.object({ image_id: z.string() })).optional(),
 });
 export function normalizeIgdbGames(value: unknown): IgdbGame[] {
   const rows = z.array(providerGameSchema).max(20).safeParse(value);
@@ -77,7 +90,29 @@ export function normalizeIgdbGames(value: unknown): IgdbGame[] {
         updateGameSchema.safeParse({ tags: tagsInput }).success
           ? updateGameSchema.parse({ tags: tagsInput }).tags
           : undefined;
+      const extra: Record<string, unknown> = {};
+      const candidates = {
+        availablePlatforms: row.platforms,
+        developers: row.involved_companies
+          ?.filter((company) => company.developer)
+          .map((company) => company.company.name),
+        publishers: row.involved_companies
+          ?.filter((company) => company.publisher)
+          .map((company) => company.company.name),
+        summary: row.summary,
+        storyline: row.storyline,
+        screenshots: row.screenshots
+          ?.filter((image) => /^[A-Za-z0-9_]+$/.test(image.image_id))
+          .slice(0, 30)
+          .map((image) => ({ imageId: image.image_id })),
+      };
+      for (const [field, value] of Object.entries(candidates)) {
+        if (value === undefined) continue;
+        const parsed = updateGameSchema.safeParse({ [field]: value });
+        if (parsed.success) Object.assign(extra, parsed.data);
+      }
       const parsed = igdbGameSchema.safeParse({
+        ...extra,
         id: row.id,
         title: row.name,
         releaseYear: validDate ? first.getUTCFullYear() : undefined,
@@ -89,8 +124,10 @@ export function normalizeIgdbGames(value: unknown): IgdbGame[] {
     })
     .filter((game): game is IgdbGame => game !== undefined);
 }
+const searchFields =
+  "fields name,first_release_date,cover.image_id,platforms.name;";
 const fields =
-  "fields name,first_release_date,release_dates.date,release_dates.date_format.format,cover.image_id,genres.name;";
+  "fields name,first_release_date,release_dates.date,release_dates.date_format.format,cover.image_id,genres.name,platforms.name,involved_companies.company.name,involved_companies.developer,involved_companies.publisher,summary,storyline,screenshots.image_id;";
 type Options = {
   credentials?: () => { clientId?: string; clientSecret?: string };
   fetch?: typeof fetch;
@@ -119,12 +156,18 @@ export function createIgdbClient(options: Options = {}) {
   let queue = Promise.resolve();
   let pending = 0;
   let lastRequest = -Infinity;
-  async function jsonRequest(url: string, init: RequestInit) {
+  async function jsonRequest(
+    url: string,
+    init: RequestInit,
+    signal?: AbortSignal,
+  ) {
     try {
       const response = await fetcher(url, {
         ...init,
         cache: "no-store",
-        signal: AbortSignal.timeout(8000),
+        signal: signal
+          ? AbortSignal.any([signal, AbortSignal.timeout(8000)])
+          : AbortSignal.timeout(8000),
         redirect: "error",
       });
       if (!response.ok) {
@@ -202,11 +245,15 @@ export function createIgdbClient(options: Options = {}) {
     };
     return token.value;
   }
-  async function query(body: string): Promise<IgdbGame[]> {
+  async function query(
+    body: string,
+    signal?: AbortSignal,
+  ): Promise<IgdbGame[]> {
+    signal?.throwIfAborted();
     const { clientId, clientSecret } = credentials();
     if (!clientId || !clientSecret)
       throw new IgdbError(
-        "IGDB search is not configured. Set IGDB_CLIENT_ID and IGDB_CLIENT_SECRET on the server, or enter the game manually.",
+        "Game search is not configured. Continue manually.",
         503,
       );
     if (pending >= 20)
@@ -215,12 +262,22 @@ export function createIgdbClient(options: Options = {}) {
         429,
       );
     pending++;
+    let counted = true;
+    const release = () => {
+      if (counted) {
+        pending--;
+        counted = false;
+      }
+    };
+    signal?.addEventListener("abort", release, { once: true });
     const task = queue.then(async () => {
       let authRetried = false,
         transientRetried = false;
       while (true) {
+        signal?.throwIfAborted();
         const access = await accessToken(clientId, clientSecret);
         await wait(Math.max(0, 260 - (now() - lastRequest)));
+        signal?.throwIfAborted();
         lastRequest = now();
         const { response, data } = await jsonRequest(
           "https://api.igdb.com/v4/games",
@@ -234,6 +291,7 @@ export function createIgdbClient(options: Options = {}) {
             },
             body,
           },
+          signal,
         );
         if (response.status === 401 && !authRetried) {
           authRetried = true;
@@ -270,17 +328,22 @@ export function createIgdbClient(options: Options = {}) {
     try {
       return await task;
     } finally {
-      pending--;
+      release();
+      signal?.removeEventListener("abort", release);
     }
   }
   return {
-    search: (search: string) =>
+    search: (search: string, signal?: AbortSignal) =>
       query(
-        `${fields} search ${JSON.stringify(searchQuerySchema.parse(search))}; limit 20;`,
+        `${searchFields} search ${JSON.stringify(searchQuerySchema.parse(search))}; limit 20;`,
+        signal,
       ),
-    async get(id: string) {
+    async get(id: string, signal?: AbortSignal) {
       return (
-        await query(`${fields} where id = ${igdbIdSchema.parse(id)}; limit 1;`)
+        await query(
+          `${fields} where id = ${igdbIdSchema.parse(id)}; limit 1;`,
+          signal,
+        )
       )[0];
     },
   };

@@ -10,8 +10,12 @@ export function DialogContent({
   children,
   className,
   busy = false,
+  showClose = true,
   ...props
-}: React.ComponentProps<typeof DialogPrimitive.Content> & { busy?: boolean }) {
+}: React.ComponentProps<typeof DialogPrimitive.Content> & {
+  busy?: boolean;
+  showClose?: boolean;
+}) {
   return (
     <DialogPrimitive.Portal>
       <DialogPrimitive.Overlay className="dialog-overlay" />
@@ -31,13 +35,15 @@ export function DialogContent({
         {...props}
       >
         {children}
-        <DialogPrimitive.Close
-          className="dialog-close button button-ghost button-icon"
-          aria-label="Close dialog"
-          disabled={busy}
-        >
-          <X size={20} />
-        </DialogPrimitive.Close>
+        {showClose && (
+          <DialogPrimitive.Close
+            className="dialog-close button button-ghost button-icon"
+            aria-label="Close dialog"
+            disabled={busy}
+          >
+            <X size={20} />
+          </DialogPrimitive.Close>
+        )}
       </DialogPrimitive.Content>
     </DialogPrimitive.Portal>
   );

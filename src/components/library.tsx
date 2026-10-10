@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Check,
+  Save,
   Columns3,
   Clock3,
   Pencil,
@@ -24,6 +25,7 @@ import {
   DialogTitle,
 } from "./ui/dialog";
 import { GameCover } from "./game-cover";
+import { GameMetadata } from "./game-metadata";
 import { GameForm, type GameFormHandle } from "./game-form";
 import {
   formatPlaytime,
@@ -66,6 +68,15 @@ export function Library() {
   }, [notice]);
   const [view, setView] = useState<Mode>("grid");
   const [filters, setFilters] = useState<Filters>(initialFilters);
+  const [confirming, setConfirming] = useState(false);
+  const keepEditing = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (confirming) keepEditing.current?.focus();
+  }, [confirming]);
+  function resumeEditing() {
+    setConfirming(false);
+    requestAnimationFrame(() => gameForm.current?.focus());
+  }
   const gameForm = useRef<GameFormHandle>(null);
   const [dialog, setDialog] = useState<OpenDialog>(null);
   const [busy, setBusy] = useState(false);
@@ -140,7 +151,7 @@ export function Library() {
           ? previous.map((item) => (item.id === game.id ? game : item))
           : [...previous, game],
       );
-      setDialog({ mode: "detail", id: game.id });
+      setDialog(null);
       setNotice({ message: `${game.title} saved.` });
     } catch (err) {
       setDialogError((err as Error).message);
@@ -729,19 +740,39 @@ export function Library() {
       <Dialog
         open={dialog !== null}
         onOpenChange={(isOpen) => {
-          if (!isOpen && !busy && !gameForm.current?.dismissAutofill())
-            setDialog(null);
+          if (!isOpen && !busy) {
+            if (gameForm.current) gameForm.current.dismiss();
+            else setDialog(null);
+          }
         }}
       >
         <DialogContent
           className={
-            dialog?.mode === "detail"
-              ? "detail-dialog"
-              : dialog?.mode === "add" || dialog?.mode === "edit"
-                ? "form-dialog"
-                : undefined
+            confirming
+              ? "unsaved-dialog"
+              : dialog?.mode === "detail"
+                ? "detail-dialog"
+                : dialog?.mode === "add" || dialog?.mode === "edit"
+                  ? "form-dialog"
+                  : undefined
           }
           busy={busy}
+          role={confirming ? "alertdialog" : "dialog"}
+          showClose={!confirming}
+          onEscapeKeyDown={(event) => {
+            if (confirming) {
+              event.preventDefault();
+              resumeEditing();
+            } else if (
+              busy ||
+              (event.target instanceof HTMLInputElement &&
+                event.target.getAttribute("aria-expanded") === "true")
+            )
+              event.preventDefault();
+          }}
+          onInteractOutside={(event) => {
+            if (busy || confirming) event.preventDefault();
+          }}
           {...(dialog?.mode === "add" || dialog?.mode === "edit"
             ? { "aria-describedby": undefined }
             : {})}
@@ -753,198 +784,246 @@ export function Library() {
             target?.focus();
           }}
         >
+          {confirming && (
+            <div className="unsaved-icon">
+              <Save size={24} aria-hidden="true" />
+            </div>
+          )}
           <DialogTitle className="dialog-title">
-            {dialog?.mode === "add"
-              ? "Add a game"
-              : dialog?.mode === "edit"
-                ? "Edit game"
-                : dialog?.mode === "delete"
-                  ? "Delete game?"
-                  : selected?.title || "Game details"}
+            {confirming
+              ? "Save changes?"
+              : dialog?.mode === "add"
+                ? "Add a game"
+                : dialog?.mode === "edit"
+                  ? "Edit game"
+                  : dialog?.mode === "delete"
+                    ? "Delete game?"
+                    : selected?.title || "Game details"}
           </DialogTitle>
-          {(dialog?.mode === "detail" || dialog?.mode === "delete") && (
-            <DialogDescription
-              className={
-                dialog?.mode === "detail" ? "sr-only" : "dialog-description"
-              }
-            >
-              {dialog?.mode === "delete"
-                ? `Remove ${selected?.title} from your library? This cannot be undone.`
-                : "Your notes, progress and game details."}
-            </DialogDescription>
+          {confirming && (
+            <p className="unsaved-context">{selected?.title || "New game"}</p>
           )}
-          {dialogError && (
-            <p role="alert" className="error-message">
-              {dialogError}
-            </p>
-          )}
-          {(dialog?.mode === "add" || dialog?.mode === "edit") && (
-            <GameForm
-              ref={gameForm}
-              key={dialog.mode === "add" ? "new" : selected?.id}
-              game={selected}
-              platforms={platforms}
-              tags={tags}
-              busy={busy}
-              onSave={save}
-              onCancel={() => {
-                setDialogError("");
-                setDialog(
-                  selected ? { mode: "detail", id: selected.id } : null,
-                );
-              }}
-            />
-          )}
-          {dialog?.mode === "detail" && selected && (
-            <>
-              <div className="game-detail">
-                <div className="detail-cover">
-                  <GameCover cover={selected.cover} title={selected.title} />
-                </div>
-                <div className="detail-metadata">
-                  <dl className="detail-primary">
-                    <div>
-                      <dt>Status</dt>
-                      <dd>
-                        <Select
-                          label={`Change ${selected.title} status`}
-                          value={selected.status}
-                          disabled={busy}
-                          onValueChange={(value) =>
-                            void move(selected.id, value as GameStatus)
-                          }
-                          options={statuses.map((status) => ({
-                            value: status,
-                            label: status,
-                          }))}
-                        />
-                      </dd>
-                    </div>
-                    <div className="detail-rating">
-                      <dt>Rating</dt>
-                      <dd>
-                        <span
-                          className="rating-stars"
-                          role="img"
-                          aria-label={
-                            selected.rating === undefined
-                              ? "Not rated"
-                              : `${selected.rating} out of 10`
-                          }
-                        >
-                          {Array.from({ length: 10 }, (_, index) => (
-                            <Star
-                              key={index}
-                              size={18}
-                              aria-hidden="true"
-                              className={
-                                index < (selected.rating ?? 0)
-                                  ? "star-filled"
-                                  : "star-empty"
-                              }
-                              fill={
-                                index < (selected.rating ?? 0)
-                                  ? "currentColor"
-                                  : "none"
-                              }
-                            />
-                          ))}
-                        </span>
-                        <span className="rating-caption" aria-hidden="true">
-                          {selected.rating === undefined
-                            ? "Not rated"
-                            : `${selected.rating} / 10`}
-                        </span>
-                      </dd>
-                    </div>
-                  </dl>
-                  <p className="detail-platforms">
-                    {selected.platforms.join(" · ") || "No platforms set"}
-                  </p>
-                  <div className="tags">
-                    {selected.tags.map((tag) => (
-                      <span className="tag" key={tag}>
-                        {tag}
-                      </span>
-                    ))}
-                  </div>
-                  <dl className="detail-secondary">
-                    <div>
-                      <dt>Playtime</dt>
-                      <dd
-                        className={
-                          selected.playtimeMinutes === undefined
-                            ? "muted"
-                            : undefined
-                        }
-                      >
-                        {formatPlaytime(selected.playtimeMinutes)}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt>Release date</dt>
-                      <dd
-                        className={!selected.releaseDate ? "muted" : undefined}
-                      >
-                        {selected.releaseDate || "Not set"}
-                      </dd>
-                    </div>
-                  </dl>
-                </div>
-              </div>
-              <section
-                className={`detail-review${!selected.review ? " is-empty" : ""}`}
-                aria-label="Review"
+          <div className="dialog-body" hidden={confirming}>
+            {(dialog?.mode === "detail" || dialog?.mode === "delete") && (
+              <DialogDescription
+                className={
+                  dialog?.mode === "detail" ? "sr-only" : "dialog-description"
+                }
               >
-                <h3>Review</h3>
-                <p
-                  className={`review ${!selected.review ? "review-empty" : ""}`}
-                >
-                  {selected.review || "No review yet."}
-                </p>
-              </section>
+                {dialog?.mode === "delete"
+                  ? `Remove ${selected?.title} from your library? This cannot be undone.`
+                  : "Your notes, progress and game details."}
+              </DialogDescription>
+            )}
+            {dialogError && (
+              <p role="alert" className="error-message">
+                {dialogError}
+              </p>
+            )}
+            {(dialog?.mode === "add" || dialog?.mode === "edit") && (
+              <GameForm
+                ref={gameForm}
+                key={dialog.mode === "add" ? "new" : selected?.id}
+                game={selected}
+                platforms={platforms}
+                tags={tags}
+                busy={busy}
+                onSave={save}
+                onRequestConfirmation={() => setConfirming(true)}
+                onDismiss={() => {
+                  setDialogError("");
+                  setDialog(null);
+                }}
+              />
+            )}
+            {dialog?.mode === "detail" && selected && (
+              <>
+                <div className="detail-scroll">
+                  <div className="game-detail">
+                    <div className="detail-cover">
+                      <GameCover
+                        cover={selected.cover}
+                        title={selected.title}
+                      />
+                    </div>
+                    <div className="detail-metadata">
+                      <dl className="detail-primary">
+                        <div>
+                          <dt>Status</dt>
+                          <dd>
+                            <Select
+                              label={`Change ${selected.title} status`}
+                              value={selected.status}
+                              disabled={busy}
+                              onValueChange={(value) =>
+                                void move(selected.id, value as GameStatus)
+                              }
+                              options={statuses.map((status) => ({
+                                value: status,
+                                label: status,
+                              }))}
+                            />
+                          </dd>
+                        </div>
+                        <div className="detail-rating">
+                          <dt>Rating</dt>
+                          <dd>
+                            <span
+                              className="rating-stars"
+                              role="img"
+                              aria-label={
+                                selected.rating === undefined
+                                  ? "Not rated"
+                                  : `${selected.rating} out of 10`
+                              }
+                            >
+                              {Array.from({ length: 10 }, (_, index) => (
+                                <Star
+                                  key={index}
+                                  size={18}
+                                  aria-hidden="true"
+                                  className={
+                                    index < (selected.rating ?? 0)
+                                      ? "star-filled"
+                                      : "star-empty"
+                                  }
+                                  fill={
+                                    index < (selected.rating ?? 0)
+                                      ? "currentColor"
+                                      : "none"
+                                  }
+                                />
+                              ))}
+                            </span>
+                            <span className="rating-caption" aria-hidden="true">
+                              {selected.rating === undefined
+                                ? "Not rated"
+                                : `${selected.rating} / 10`}
+                            </span>
+                          </dd>
+                        </div>
+                      </dl>
+                      <p className="detail-platforms">
+                        {selected.platforms.join(" · ") || "No platforms set"}
+                      </p>
+                      <div className="tags">
+                        {selected.tags.map((tag) => (
+                          <span className="tag" key={tag}>
+                            {tag}
+                          </span>
+                        ))}
+                      </div>
+                      <dl className="detail-secondary">
+                        <div>
+                          <dt>Playtime</dt>
+                          <dd
+                            className={
+                              selected.playtimeMinutes === undefined
+                                ? "muted"
+                                : undefined
+                            }
+                          >
+                            {formatPlaytime(selected.playtimeMinutes)}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt>Release date</dt>
+                          <dd
+                            className={
+                              !selected.releaseDate ? "muted" : undefined
+                            }
+                          >
+                            {selected.releaseDate || "Not set"}
+                          </dd>
+                        </div>
+                      </dl>
+                    </div>
+                  </div>
+                  <section
+                    className={`detail-review${!selected.review ? " is-empty" : ""}`}
+                    aria-label="Review"
+                  >
+                    <h3>Review</h3>
+                    <p
+                      className={`review ${!selected.review ? "review-empty" : ""}`}
+                    >
+                      {selected.review || "No review yet."}
+                    </p>
+                  </section>
+                  <GameMetadata game={selected} />
+                </div>
+                <div className="dialog-actions detail-actions">
+                  <Button
+                    variant="destructive"
+                    disabled={busy}
+                    className="delete-action"
+                    onClick={() => {
+                      setDialogError("");
+                      setDialog({ mode: "delete", id: selected.id });
+                    }}
+                  >
+                    <Trash2 size={15} aria-hidden="true" /> Delete
+                  </Button>
+                  <Button variant="secondary" onClick={() => setDialog(null)}>
+                    Close
+                  </Button>
+                  <Button
+                    disabled={busy}
+                    onClick={() => {
+                      setDialogError("");
+                      setDialog({ mode: "edit", id: selected.id });
+                    }}
+                  >
+                    <Pencil size={15} aria-hidden="true" /> Edit
+                  </Button>
+                </div>
+              </>
+            )}
+            {dialog?.mode === "delete" && selected && (
               <div className="dialog-actions">
                 <Button
-                  variant="destructive"
+                  variant="secondary"
                   disabled={busy}
-                  className="delete-action"
+                  autoFocus
                   onClick={() => {
                     setDialogError("");
-                    setDialog({ mode: "delete", id: selected.id });
+                    setDialog({ mode: "detail", id: selected.id });
                   }}
                 >
-                  <Trash2 size={15} aria-hidden="true" /> Delete
+                  Keep game
                 </Button>
-                <Button variant="secondary" onClick={() => setDialog(null)}>
-                  Close
-                </Button>
-                <Button
-                  disabled={busy}
-                  onClick={() => {
-                    setDialogError("");
-                    setDialog({ mode: "edit", id: selected.id });
-                  }}
-                >
-                  <Pencil size={15} aria-hidden="true" /> Edit
+                <Button variant="destructive" disabled={busy} onClick={remove}>
+                  {busy ? "Deleting…" : "Delete game"}
                 </Button>
               </div>
-            </>
-          )}
-          {dialog?.mode === "delete" && selected && (
-            <div className="dialog-actions">
+            )}
+          </div>
+          {confirming && (
+            <div className="unsaved-actions">
               <Button
-                variant="secondary"
-                disabled={busy}
-                autoFocus
+                ref={keepEditing}
+                className="keep-editing"
+                variant="ghost"
+                onClick={resumeEditing}
+              >
+                Keep editing
+              </Button>
+              <Button
+                variant="destructive"
                 onClick={() => {
-                  setDialogError("");
-                  setDialog({ mode: "detail", id: selected.id });
+                  setConfirming(false);
+                  setDialog(null);
                 }}
               >
-                Keep game
+                Discard
               </Button>
-              <Button variant="destructive" disabled={busy} onClick={remove}>
-                {busy ? "Deleting…" : "Delete game"}
+              <Button
+                onClick={() => {
+                  setConfirming(false);
+                  gameForm.current?.saveAndClose();
+                }}
+              >
+                Save and close
               </Button>
             </div>
           )}

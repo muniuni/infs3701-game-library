@@ -6,11 +6,6 @@ import {
   normalizeIgdbGames,
   igdbApiError,
 } from "../src/lib/server-igdb";
-import {
-  defaultMetadataPreferences,
-  metadataChoices,
-  readMetadataPreferences,
-} from "../src/lib/igdb";
 const timestamp = Date.parse("2024-02-29T00:00:00Z") / 1000;
 const row = {
   id: 1,
@@ -158,49 +153,6 @@ test("configuration, transport, oversized bodies and provider errors expose no c
   const oversized = setup(() => new Response("x".repeat(1024 * 1024 + 1)));
   await assert.rejects(oversized.client.search("Oversized"), IgdbError);
 });
-test("Edit choices check available changes and retain valid Create preferences", () => {
-  const proposal = normalizeIgdbGames([row])[0];
-  const choices = metadataChoices(
-    {
-      title: "My title",
-      releaseDate: "",
-      tags: ["Favourite"],
-      cover: { type: "placeholder" },
-    },
-    proposal,
-  );
-  assert.deepEqual(choices, {
-    title: true,
-    releaseDate: true,
-    cover: true,
-    tags: true,
-  });
-  const prefs = readMetadataPreferences(
-    JSON.stringify({ ...defaultMetadataPreferences, cover: false }),
-  );
-  assert.equal(prefs.cover, false);
-  assert.equal(
-    metadataChoices(
-      {
-        title: proposal.title,
-        releaseDate: "",
-        tags: [],
-        cover: { type: "placeholder" },
-      },
-      proposal,
-    ).title,
-    false,
-  );
-  assert.deepEqual(
-    readMetadataPreferences("corrupt"),
-    defaultMetadataPreferences,
-  );
-  assert.deepEqual(
-    readMetadataPreferences('{"title":true}'),
-    defaultMetadataPreferences,
-  );
-});
-
 test("the process queue bounds pending requests and recovers after saturation", async () => {
   let release!: () => void;
   const gate = new Promise<void>((resolve) => {
@@ -234,70 +186,109 @@ test("the process queue bounds pending requests and recovers after saturation", 
   assert.equal((await client.search("Recovered"))[0].id, row.id);
 });
 
-test("Create autofill merges genres, retains uploads, respects preferences and field limits", async () => {
-  const { createAutofillDraft } = await import("../src/lib/igdb");
-  const proposal = normalizeIgdbGames([row])[0];
+test("metadata modes preserve personal tags and omit missing provider values", async () => {
+  const { metadataChoices, applyMetadata, metadataProposal } =
+    await import("../src/lib/igdb");
   const draft = {
-    title: "Manual title",
-    releaseDate: "2020-01-01",
+    title: "Personal name",
+    releaseDate: "",
+    cover: { type: "upload" as const, url: "/api/covers/synthetic" },
     tags: ["Favourite", "puzzle"],
-    cover: { type: "upload" as const, url: "blob:manual" },
+    developers: [],
+    publishers: [],
+    summary: "My summary",
+    storyline: "",
+    screenshots: [],
   };
-  const result = createAutofillDraft(
-    draft,
-    proposal,
-    defaultMetadataPreferences,
-  );
-  assert.deepEqual(result.draft.tags, ["Favourite", "puzzle"]);
-  assert.deepEqual(result.draft.cover, draft.cover);
-  assert.deepEqual(result.changed, ["title", "releaseDate"]);
-  assert.deepEqual(draft.tags, ["Favourite", "puzzle"]);
-  const withUrl = createAutofillDraft(
-    {
-      ...draft,
-      tags: ["Favourite"],
-      cover: { type: "url", url: "https://example.com/manual.jpg" },
-    },
-    proposal,
-    defaultMetadataPreferences,
-  );
-  assert.deepEqual(withUrl.draft.tags, ["Favourite", "Puzzle"]);
-  assert.deepEqual(withUrl.draft.cover, proposal.cover);
-  const disabled = createAutofillDraft(draft, proposal, {
-    title: false,
-    releaseDate: false,
-    tags: false,
-    cover: false,
-  });
-  assert.deepEqual(disabled.draft, draft);
-  assert.equal(disabled.changed.length, 0);
-  const full = Array.from({ length: 30 }, (_, index) => `Manual ${index}`);
+  const game = {
+    ...normalizeIgdbGames([row])[0],
+    developers: ["Studio"],
+    summary: "Provider summary",
+    storyline: "Plot",
+    screenshots: [{ imageId: "shot" }],
+  };
+  const empty = metadataChoices(draft, game, "empty");
+  assert.equal(empty.title, false);
+  assert.equal(empty.cover, false);
+  assert.equal(empty.tags, false);
+  assert.equal(empty.releaseDate, true);
+  assert.equal(empty.summary, false);
+  const filled = applyMetadata(draft, game, empty);
+  assert.equal(filled.summary, "My summary");
+  assert.deepEqual(filled.developers, ["Studio"]);
+  const replace = metadataChoices(draft, game, "replace");
+  const replaced = applyMetadata(draft, game, replace);
+  assert.deepEqual(replaced.tags, ["Favourite", "puzzle"]);
+  assert.equal(replaced.cover.type, "url");
+  assert.equal(replaced.summary, "Provider summary");
   assert.deepEqual(
-    createAutofillDraft(
-      { ...draft, tags: full },
-      proposal,
-      defaultMetadataPreferences,
-    ).draft.tags,
-    full,
+    metadataProposal(draft, { id: 2, title: draft.title }),
+    draft,
   );
+  assert.deepEqual(
+    applyMetadata(draft, game, { ...empty, releaseDate: false }),
+    { ...filled, releaseDate: "" },
+  );
+  const many = {
+    ...draft,
+    tags: Array.from({ length: 30 }, (_, i) => `Tag${i}`),
+  };
+  assert.equal(metadataProposal(many, game).tags.length, 31); // Never silently truncate a union.
 });
 
-test("Edit genres append and unchanged merged tags are not offered", async () => {
-  const { editAutofillProposal } = await import("../src/lib/igdb");
-  const draft = {
-    title: "Manual",
-    releaseDate: "",
-    tags: ["Personal", "puzzle"],
-    cover: { type: "placeholder" as const },
-  };
-  const result = editAutofillProposal(draft, {
-    ...normalizeIgdbGames([row])[0],
-    tags: ["Puzzle", "Adventure"],
+test("provider normalizes companies, platforms, text and safe screenshot references", () => {
+  const [game] = normalizeIgdbGames([
+    {
+      ...row,
+      platforms: [{ id: 6, name: "PC (Microsoft Windows)" }],
+      involved_companies: [
+        { company: { name: "Studio" }, developer: true, publisher: true },
+        { company: { name: "Support" }, supporting: true },
+      ],
+      summary: "Summary",
+      storyline: "Story",
+      screenshots: [{ image_id: "shot_1" }, { image_id: "../../unsafe" }],
+    },
+  ]);
+  assert.deepEqual(game.availablePlatforms, [
+    { id: 6, name: "PC (Microsoft Windows)" },
+  ]);
+  assert.deepEqual(game.developers, ["Studio"]);
+  assert.deepEqual(game.publishers, ["Studio"]);
+  assert.equal(game.storyline, "Story");
+  assert.deepEqual(game.screenshots, [{ imageId: "shot_1" }]);
+});
+
+test("queued aborted searches do not reach IGDB or consume pending capacity", async () => {
+  let unlock!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    unlock = resolve;
   });
-  assert.deepEqual(result.tags, ["Personal", "puzzle", "Adventure"]);
-  const same = editAutofillProposal({ ...draft, tags: result.tags! }, result);
-  assert.equal(
-    metadataChoices({ ...draft, tags: result.tags! }, same).tags,
-    false,
+  const bodies: string[] = [];
+  const client = createIgdbClient({
+    credentials: () => ({ clientId: "fixture", clientSecret: "fixture" }),
+    wait: async () => {},
+    fetch: async (url, init) => {
+      if (String(url).includes("oauth2")) {
+        await gate;
+        return Response.json({ access_token: "fixture", expires_in: 3600 });
+      }
+      bodies.push(String(init?.body));
+      return Response.json([row]);
+    },
+  });
+  const first = client.search("First");
+  const abort = new AbortController();
+  const stale = client.search("Stale", abort.signal);
+  const rejected = assert.rejects(
+    stale,
+    (error) => error instanceof Error && error.name === "AbortError",
   );
+  abort.abort();
+  const latest = client.search("Latest");
+  unlock();
+  await Promise.all([first, rejected, latest]);
+  assert.equal(bodies.length, 2);
+  assert.ok(bodies.every((body) => !body.includes("Stale")));
+  assert.ok(!bodies[0].includes("storyline"));
 });

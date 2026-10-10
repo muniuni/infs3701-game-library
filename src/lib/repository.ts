@@ -14,8 +14,12 @@ export interface GameRepository {
   deleteGame(id: string): Promise<boolean>;
 }
 export class DuplicateGameError extends Error {
-  constructor() {
-    super("A game with this title already exists. Edit its platforms instead.");
+  constructor(identity: "title" | "igdb" = "title") {
+    super(
+      identity === "igdb"
+        ? "This IGDB game is already in your library. Edit the existing game instead."
+        : "A game with this title already exists. Edit its platforms instead.",
+    );
   }
 }
 export const titleKey = (title: string) =>
@@ -48,9 +52,19 @@ export class InMemoryGameRepository implements GameRepository {
     )
       throw new DuplicateGameError();
   }
+  private checkIgdb(igdbId: number | null | undefined, id?: string) {
+    if (
+      igdbId &&
+      [...this.games.values()].some(
+        (game) => game.id !== id && game.igdbId === igdbId,
+      )
+    )
+      throw new DuplicateGameError("igdb");
+  }
   async createGame(input: CreateGameInput) {
     const parsed = createGameSchema.parse(input);
     this.checkTitle(parsed.title);
+    this.checkIgdb(parsed.igdbId);
     const now = new Date().toISOString();
     const game = {
       ...optionalFields(parsed),
@@ -66,6 +80,7 @@ export class InMemoryGameRepository implements GameRepository {
     const previous = this.games.get(id);
     if (!previous) return undefined;
     if (parsed.title !== undefined) this.checkTitle(parsed.title, id);
+    this.checkIgdb(parsed.igdbId, id);
     const game = {
       ...previous,
       ...optionalFields(parsed),

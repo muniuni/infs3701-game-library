@@ -10,6 +10,7 @@ datasource db {
 model Game {
   id       String @id
   titleKey String @unique
+  igdbId   Int? @unique
   data     Json
   coverKey String? @unique
 }

@@ -1,39 +1,75 @@
 "use client";
 import {
-  useCallback,
   useEffect,
   useImperativeHandle,
   useRef,
   useState,
   type Ref,
 } from "react";
+import { ChevronLeft, Star, Upload } from "lucide-react";
 import {
   statuses,
-  type Game,
-  type UpdateGameInput,
   createGameSchema,
+  type Game,
+  type Cover,
+  type UpdateGameInput,
 } from "@/lib/game";
+import {
+  metadataFields,
+  metadataLabels,
+  type MetadataDraft,
+  type IgdbGame,
+  type MetadataChoices,
+} from "@/lib/igdb";
 import { Button } from "./ui/button";
 import { Select } from "./ui/select";
 import { GameCover } from "./game-cover";
-import { IgdbAutofill } from "./igdb-autofill";
-import {
-  createAutofillDraft,
-  mergeIgdbTags,
-  igdbPreferenceKey,
-  metadataFields,
-  readMetadataPreferences,
-  type IgdbGame,
-  type MetadataDraft,
-  type MetadataField,
-  type MetadataPreferences,
-} from "@/lib/igdb";
-import { IgdbTitleInput } from "./igdb-title-input";
-import { AutofillNotice } from "./autofill-notice";
-import type { Cover } from "@/lib/game";
 import { TokenInput } from "./token-input";
-import { Star, Upload } from "lucide-react";
-export type GameFormHandle = { dismissAutofill: () => boolean };
+import { IgdbAutofill } from "./igdb-autofill";
+import { ScreenshotGallery } from "./game-metadata";
+
+type Draft = MetadataDraft & {
+  igdbId?: number;
+  availablePlatforms: { id: number; name: string }[];
+  platforms: string[];
+  status: Game["status"];
+  hours: string;
+  minutes: string;
+  rating: number;
+  review: string;
+};
+function initialDraft(game?: Game): Draft {
+  return {
+    title: game?.title ?? "",
+    releaseDate: game?.releaseDate ?? "",
+    cover: game?.cover ?? { type: "placeholder" },
+    tags: game?.tags ?? [],
+    developers: game?.developers ?? [],
+    publishers: game?.publishers ?? [],
+    summary: game?.summary ?? "",
+    storyline: game?.storyline ?? "",
+    screenshots: game?.screenshots ?? [],
+    igdbId: game?.igdbId,
+    availablePlatforms: game?.availablePlatforms ?? [],
+    platforms: game?.platforms ?? [],
+    status: game?.status ?? "Unplayed",
+    hours:
+      game?.playtimeMinutes === undefined
+        ? ""
+        : String(Math.floor(game.playtimeMinutes / 60)),
+    minutes:
+      game?.playtimeMinutes === undefined
+        ? ""
+        : String(game.playtimeMinutes % 60),
+    rating: game?.rating ?? 0,
+    review: game?.review ?? "",
+  };
+}
+export type GameFormHandle = {
+  dismiss: () => void;
+  saveAndClose: () => void;
+  focus: () => void;
+};
 export function GameForm({
   ref,
   game,
@@ -41,276 +77,248 @@ export function GameForm({
   tags = [],
   busy,
   onSave,
-  onCancel,
+  onDismiss,
+  onRequestConfirmation,
 }: {
   ref?: Ref<GameFormHandle>;
   game?: Game;
   platforms?: string[];
   tags?: string[];
   busy: boolean;
-  onSave: (input: UpdateGameInput, image?: File) => Promise<void>;
-  onCancel: () => void;
+  onSave: (
+    input: UpdateGameInput,
+    image?: File,
+    dismiss?: boolean,
+  ) => Promise<void>;
+  onDismiss: () => void;
+  onRequestConfirmation: () => void;
 }) {
-  const [title, setTitle] = useState(game?.title ?? "");
-  const [releaseDate, setReleaseDate] = useState(game?.releaseDate ?? "");
-  const [draftTags, setDraftTags] = useState(game?.tags ?? []);
-  const [cover, setCover] = useState<Cover>(
-    game?.cover ?? { type: "placeholder" },
-  );
-  const [coverChanged, setCoverChanged] = useState(false);
-  const [metadataDraft, setMetadataDraft] = useState<MetadataDraft>();
-  const searchButton = useRef<HTMLButtonElement>(null);
-  const titleInput = useRef<HTMLInputElement>(null);
-  const [preferences, setPreferences] = useState(() => {
-    try {
-      return readMetadataPreferences(localStorage.getItem(igdbPreferenceKey));
-    } catch {
-      return readMetadataPreferences(null);
-    }
-  });
-  const [undo, setUndo] = useState<{
-    sequence: number;
-    before: MetadataDraft;
-    fields: MetadataField[];
-    image?: File;
-    cover: Cover;
-    coverChanged: boolean;
-    uploadError: string;
-  }>();
-  const undoSequence = useRef(0);
-  const clearUndo = useCallback(() => setUndo(undefined), []);
-  function updatePreference(field: MetadataField, checked: boolean) {
-    const next = { ...preferences, [field]: checked };
-    setPreferences(next);
-    try {
-      localStorage.setItem(igdbPreferenceKey, JSON.stringify(next));
-    } catch {}
-  }
-  const form = useRef<HTMLFormElement>(null);
-  function backToForm() {
-    setMetadataDraft(undefined);
-    requestAnimationFrame(() =>
-      (game ? searchButton.current : titleInput.current)?.focus(),
-    );
-  }
-  useImperativeHandle(ref, () => ({
-    dismissAutofill() {
-      if (!metadataDraft) return false;
-      backToForm();
-      return true;
-    },
+  const [draft, setDraft] = useState(() => initialDraft(game));
+  const [baseline] = useState(() => JSON.stringify(initialDraft(game)));
+  const [companyText, setCompanyText] = useState(() => ({
+    developers: (game?.developers ?? []).join(", "),
+    publishers: (game?.publishers ?? []).join(", "),
   }));
+  const [panel, setPanel] = useState(!game);
+  const [visited, setVisited] = useState(false);
+  const [session, setSession] = useState(0);
   const [image, setImage] = useState<File>();
+  const [preview, setPreview] = useState<string>();
+  const [error, setError] = useState("");
   const [uploadError, setUploadError] = useState("");
   const [dragging, setDragging] = useState(false);
-  const uploadErrorRef = useRef<HTMLParagraphElement>(null);
-  useEffect(() => {
-    if (uploadError) uploadErrorRef.current?.focus();
-  }, [uploadError]);
-  function selectImage(files: File[]) {
-    if (busy || !files.length) return;
-    const file = files[0];
-    if (files.length !== 1) {
-      setUploadError("Choose one image at a time.");
+  const [hoverRating, setHoverRating] = useState<number | null>(null);
+  const errorRef = useRef<HTMLParagraphElement>(null);
+  const form = useRef<HTMLFormElement>(null);
+  const titleInput = useRef<HTMLInputElement>(null);
+  const updateButton = useRef<HTMLButtonElement>(null);
+  const workflow = useRef<import("./igdb-autofill").AutofillHandle>(null);
+  async function persist(draft: Draft, dismiss = false, replaceCover = false) {
+    if (busy) return;
+    if (!panel && form.current && !form.current.reportValidity()) return;
+    const data =
+      !panel && form.current ? new FormData(form.current) : new FormData();
+    const tokens = (field: string, fallback: string[]) =>
+      data.has(field)
+        ? String(data.get(field))
+            .split(",")
+            .map((value) => value.trim())
+            .filter(Boolean)
+        : fallback;
+    const input = {
+      ...draft,
+      tags: tokens("tags", draft.tags),
+      platforms: tokens("platforms", draft.platforms),
+      developers: draft.developers,
+      publishers: draft.publishers,
+      hours: undefined,
+      minutes: undefined,
+      releaseDate: draft.releaseDate || null,
+      summary: draft.summary || null,
+      storyline: draft.storyline || null,
+      rating: draft.rating || null,
+      review: draft.review || null,
+      playtimeMinutes:
+        draft.hours || draft.minutes
+          ? Number(draft.hours) * 60 + Number(draft.minutes)
+          : null,
+      cover: draft.cover.type === "url" ? draft.cover : { type: "placeholder" },
+    };
+    const { hours, minutes, ...values } = input;
+    void hours;
+    void minutes;
+    const parsed = createGameSchema.safeParse(values);
+    if (!parsed.success) {
+      setError(
+        parsed.error.issues
+          .map((issue) => `${issue.path.join(".")}: ${issue.message}`)
+          .join(" "),
+      );
       return;
     }
-    if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
-      setUploadError("Choose a JPEG, PNG or WebP image.");
-      return;
-    }
-    if (!file.size || file.size > 5 * 1024 * 1024) {
-      setUploadError("Choose a non-empty image up to 5 MB.");
-      return;
-    }
-    setUploadError("");
     setError("");
-    setImage(file);
-    setPreview(URL.createObjectURL(file));
+    const saved: UpdateGameInput = { ...parsed.data };
+    if (
+      game &&
+      !image &&
+      JSON.stringify(draft.cover) === JSON.stringify(game.cover)
+    )
+      delete saved.cover;
+    await onSave(saved, replaceCover ? undefined : image, dismiss);
   }
-  const [preview, setPreview] = useState<string>();
+  function close() {
+    dismiss();
+  }
+  function saveAndClose() {
+    if (busy) return;
+    if (panel) {
+      const pending = workflow.current?.pending();
+      if (!pending) {
+        setPanel(false);
+        void persist(draft, true);
+        return;
+      }
+      const next = {
+        ...draft,
+        ...pending.draft,
+        ...(pending.game
+          ? {
+              igdbId: pending.game.id,
+              availablePlatforms: pending.game.availablePlatforms ?? [],
+            }
+          : {}),
+      };
+      if (pending.replaceCover) {
+        setImage(undefined);
+        setPreview(undefined);
+        setUploadError("");
+      }
+      setCompanyText({
+        developers: next.developers.join(", "),
+        publishers: next.publishers.join(", "),
+      });
+      setDraft(next);
+      setPanel(false);
+      void persist(next, true, pending.replaceCover);
+    } else void persist(draft, true);
+  }
+  function dismiss() {
+    if (busy) return;
+    const pending = panel ? workflow.current?.pending() : undefined;
+    const candidate = pending
+      ? {
+          ...draft,
+          ...pending.draft,
+          ...(pending.game
+            ? {
+                igdbId: pending.game.id,
+                availablePlatforms:
+                  pending.game.availablePlatforms ?? draft.availablePlatforms,
+              }
+            : {}),
+        }
+      : draft;
+    const dirty =
+      !!image ||
+      JSON.stringify(candidate) !== baseline ||
+      (panel && workflow.current?.hasSearchChanges());
+    if (dirty) onRequestConfirmation();
+    else onDismiss();
+  }
+  useImperativeHandle(ref, () => ({
+    dismiss,
+    saveAndClose,
+    focus: () => {
+      if (panel) workflow.current?.focus();
+      else titleInput.current?.focus();
+    },
+  }));
   useEffect(
     () => () => {
       if (preview) URL.revokeObjectURL(preview);
     },
     [preview],
   );
-  const [rating, setRating] = useState(game?.rating ?? 0);
-  const [hoverRating, setHoverRating] = useState<number | null>(null);
-  const [error, setError] = useState("");
-  const errorSummary = useRef<HTMLParagraphElement>(null);
   useEffect(() => {
-    if (error) {
-      errorSummary.current?.focus();
-      errorSummary.current?.scrollIntoView({ block: "nearest" });
+    if (error || uploadError) {
+      errorRef.current?.focus();
+      errorRef.current?.scrollIntoView({ block: "nearest" });
     }
-  }, [error]);
-  async function submit(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (metadataDraft) return;
-    const data = new FormData(event.currentTarget);
-    const value = (key: string) => String(data.get(key) ?? "").trim();
-    const labels = (key: string) =>
-      value(key)
-        .split(",")
-        .map((item) => item.trim())
-        .filter(Boolean);
-    const hours = value("hours"),
-      minutes = value("minutes");
-    const input = {
-      title: value("title"),
-      platforms: labels("platforms"),
-      tags: labels("tags"),
-      status: value("status"),
-      releaseDate: value("releaseDate") || null,
-      playtimeMinutes:
-        hours || minutes ? Number(hours) * 60 + Number(minutes) : null,
-      rating: rating || null,
-      review: value("review") || null,
-      cover: cover.type === "url" ? cover : { type: "placeholder" },
-    };
-    const parsed = createGameSchema.safeParse(input);
-    if (!parsed.success) {
-      setError(parsed.error.issues.map((issue) => issue.message).join(" "));
+  }, [error, uploadError]);
+  function patch<K extends keyof Draft>(field: K, value: Draft[K]) {
+    setDraft((previous) => ({ ...previous, [field]: value }));
+  }
+  function returnToForm() {
+    setPanel(false);
+    requestAnimationFrame(() =>
+      (game ? updateButton.current : titleInput.current)?.focus(),
+    );
+  }
+  function selectImage(files: File[]) {
+    if (busy || !files.length) return;
+    const file = files[0];
+    if (
+      files.length !== 1 ||
+      !["image/jpeg", "image/png", "image/webp"].includes(file.type) ||
+      !file.size ||
+      file.size > 5 * 1024 * 1024
+    ) {
+      setUploadError("Choose one JPEG, PNG or WebP image up to 5 MB.");
       return;
     }
-    setError("");
-    clearUndo();
-    const savedInput: UpdateGameInput = { ...parsed.data };
-    if (game && !image && !coverChanged) delete savedInput.cover;
-    await onSave(savedInput, image);
+    setUploadError("");
+    setImage(file);
+    setPreview(URL.createObjectURL(file));
   }
-  function currentMetadata(): MetadataDraft {
-    const data = new FormData(form.current!);
-    return {
-      title,
-      releaseDate,
-      tags: String(data.get("tags") ?? "")
-        .split(",")
-        .map((value) => value.trim())
-        .filter(Boolean),
-      cover: preview ? { type: "upload", url: preview } : cover,
-    };
-  }
-  function applyMetadata(proposal: IgdbGame, choices: MetadataPreferences) {
-    if (choices.title) setTitle(proposal.title);
-    if (choices.releaseDate && proposal.releaseDate)
-      setReleaseDate(proposal.releaseDate);
-    if (choices.tags && proposal.tags)
-      setDraftTags(mergeIgdbTags(currentMetadata().tags, proposal.tags));
-    if (choices.cover && proposal.cover) {
-      setCover(proposal.cover);
-      setCoverChanged(true);
+  function apply(
+    next: MetadataDraft,
+    selected: IgdbGame,
+    choices: MetadataChoices,
+  ) {
+    if (choices.cover) {
       setImage(undefined);
       setPreview(undefined);
       setUploadError("");
     }
-    setError("");
-  }
-  function applyCreate(proposal: IgdbGame) {
-    const before = currentMetadata();
-    const result = createAutofillDraft(before, proposal, preferences);
-    // A later selection supersedes the prior Undo, even when no fields change.
-    clearUndo();
-    if (!result.changed.length) return;
-    setUndo({
-      sequence: ++undoSequence.current,
-      before,
-      fields: result.changed,
-      image,
-      cover,
-      coverChanged,
-      uploadError,
+    setCompanyText({
+      developers: next.developers.join(", "),
+      publishers: next.publishers.join(", "),
     });
-    setTitle(result.draft.title);
-    setReleaseDate(result.draft.releaseDate);
-    setDraftTags(result.draft.tags);
-    if (result.changed.includes("cover")) {
-      setCover(result.draft.cover);
-      setCoverChanged(true);
-    }
+    setDraft((previous) => ({
+      ...previous,
+      ...next,
+      igdbId: selected.id,
+      availablePlatforms:
+        selected.availablePlatforms ??
+        (previous.igdbId === selected.id ? previous.availablePlatforms : []),
+    }));
     setError("");
+    setVisited(true);
+    returnToForm();
   }
-  function restoreAutofill() {
-    if (!undo) return;
-    if (undo.fields.includes("title")) setTitle(undo.before.title);
-    if (undo.fields.includes("releaseDate"))
-      setReleaseDate(undo.before.releaseDate);
-    if (undo.fields.includes("tags")) setDraftTags(undo.before.tags);
-    if (undo.fields.includes("cover")) {
-      setCover(undo.cover);
-      setCoverChanged(undo.coverChanged);
-      setImage(undo.image);
-      setPreview(undo.image ? URL.createObjectURL(undo.image) : undefined);
-      setUploadError(undo.uploadError);
-    }
-    clearUndo();
-    requestAnimationFrame(() => titleInput.current?.focus());
+  async function submit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (panel || busy) return;
+    await persist(draft);
   }
-  const hasCover = !!image || cover.type !== "placeholder";
-  return (
-    <form ref={form} onSubmit={submit} className="game-form">
-      {metadataDraft && (
-        <IgdbAutofill
-          draft={metadataDraft}
-          onBack={backToForm}
-          onApply={(proposal, choices) => {
-            if (game) applyMetadata(proposal, choices);
-            else applyCreate(proposal);
-            backToForm();
-          }}
-        />
-      )}
-      <div className="form-fields" hidden={!!metadataDraft}>
-        <fieldset disabled={busy}>
-          <div className="igdb-entry">
-            {!game && (
-              <details className="igdb-preferences">
-                <summary>Autofill fields</summary>
-                <div className="igdb-preference-options">
-                  {metadataFields.map((field) => (
-                    <label className="igdb-checkbox" key={field}>
-                      <input
-                        type="checkbox"
-                        aria-label={`Autofill ${field === "releaseDate" ? "release date" : field === "tags" ? "genres" : field}`}
-                        checked={preferences[field]}
-                        onChange={(event) =>
-                          updatePreference(field, event.target.checked)
-                        }
-                      />
-                      {
-                        {
-                          title: "Title",
-                          releaseDate: "Release date",
-                          cover: "Cover",
-                          tags: "Genres (Tags)",
-                        }[field]
-                      }
-                    </label>
-                  ))}
-                </div>
-              </details>
-            )}
-          </div>
-          <div className="form-overview">
-            <section className="cover-section" aria-labelledby="cover-heading">
-              <h3 id="cover-heading" className="field-label">
-                Cover image
-              </h3>
-              <div className="cover-editor">
+  const displayedCover: Cover = preview
+    ? { type: "upload", url: preview }
+    : draft.cover;
+  function renderFields(fields: readonly (typeof metadataFields)[number][]) {
+    return (
+      <div className="metadata-form-grid">
+        {fields.map((field) => (
+          <div className={`metadata-input metadata-input-${field}`} key={field}>
+            {field === "cover" ? (
+              <section className="cover-section" aria-label="Cover image">
+                <h3 className="field-label">Cover image</h3>
                 <label
                   className={`form-cover-preview cover-dropzone${dragging ? " is-dragging" : ""}`}
                   onDragOver={(event) => {
                     event.preventDefault();
-                    if (!busy) setDragging(true);
+                    setDragging(true);
                   }}
-                  onDragLeave={(event) => {
-                    if (
-                      !event.currentTarget.contains(
-                        event.relatedTarget as Node | null,
-                      )
-                    )
-                      setDragging(false);
-                  }}
+                  onDragLeave={() => setDragging(false)}
                   onDrop={(event) => {
                     event.preventDefault();
                     setDragging(false);
@@ -318,24 +326,18 @@ export function GameForm({
                   }}
                 >
                   <GameCover
-                    cover={preview ? { type: "upload", url: preview } : cover}
-                    title={title || "Game"}
+                    cover={displayedCover}
+                    title={draft.title || "Game"}
                   />
                   <span className="cover-preview-action">
-                    <Upload size={14} aria-hidden="true" />
-                    {dragging
-                      ? "Drop image"
-                      : hasCover
-                        ? "Change image"
-                        : "Upload image"}
+                    <Upload size={14} />
+                    {image || draft.cover.type !== "placeholder"
+                      ? "Change image"
+                      : "Upload image"}
                   </span>
                   <input
                     type="file"
                     aria-label="Upload cover image"
-                    aria-invalid={!!uploadError}
-                    aria-errormessage={
-                      uploadError ? "cover-upload-error" : undefined
-                    }
                     accept="image/jpeg,image/png,image/webp"
                     onChange={(event) => {
                       selectImage(Array.from(event.target.files ?? []));
@@ -343,243 +345,358 @@ export function GameForm({
                     }}
                   />
                 </label>
-              </div>
-              {uploadError && (
-                <p
-                  id="cover-upload-error"
-                  className="cover-upload-error"
-                  role="alert"
-                  tabIndex={-1}
-                  ref={uploadErrorRef}
-                >
-                  {uploadError}
-                </p>
-              )}
-            </section>
-            <div className="form-identity">
-              {game ? (
-                <div className="edit-title-field">
-                  <div className="title-label-row">
-                    <label htmlFor="edit-game-title">
-                      Title <span aria-hidden="true">*</span>
-                    </label>
-                    <Button
-                      ref={searchButton}
-                      type="button"
-                      variant="ghost"
-                      className="title-autofill"
-                      onClick={() => setMetadataDraft(currentMetadata())}
-                    >
-                      Autofill
-                    </Button>
-                  </div>
-                  <input
-                    id="edit-game-title"
-                    ref={titleInput}
-                    name="title"
-                    aria-label="Title"
-                    value={title}
-                    onChange={(event) => setTitle(event.target.value)}
-                    required
-                    maxLength={160}
-                    placeholder="Game title"
-                    autoFocus
-                  />
-                </div>
-              ) : (
-                <IgdbTitleInput
-                  value={title}
-                  onValueChange={setTitle}
-                  onSelect={applyCreate}
-                  disabled={busy || !!metadataDraft}
-                  inputRef={titleInput}
-                />
-              )}
+              </section>
+            ) : field === "developers" || field === "publishers" ? (
               <label>
-                Status
-                <Select
-                  name="status"
-                  label="Status"
-                  defaultValue={game?.status ?? "Unplayed"}
-                  disabled={busy}
-                  options={statuses.map((status) => ({
-                    value: status,
-                    label: status,
-                  }))}
+                {metadataLabels[field]}
+                <input
+                  name={field}
+                  value={companyText[field]}
+                  onChange={(event) => {
+                    const value = event.currentTarget.value;
+                    setCompanyText((previous) => ({
+                      ...previous,
+                      [field]: value,
+                    }));
+                    patch(
+                      field,
+                      value
+                        .split(",")
+                        .map((value) => value.trim())
+                        .filter(Boolean),
+                    );
+                  }}
                 />
               </label>
-            </div>
-          </div>
-          <div className="form-pair">
-            <TokenInput
-              name="platforms"
-              label="Platforms"
-              initial={game?.platforms}
-              suggestions={platforms}
-              disabled={busy}
-              chips
-            />
-            <TokenInput
-              name="tags"
-              label="Tags"
-              value={draftTags}
-              onValueChange={setDraftTags}
-              suggestions={tags}
-              disabled={busy}
-            />
-          </div>
-          <div className="form-pair">
-            <label>
-              Release date
-              <input
-                name="releaseDate"
-                type="date"
-                value={releaseDate}
-                onChange={(event) => setReleaseDate(event.target.value)}
+            ) : field === "tags" ? (
+              <TokenInput
+                name={field}
+                label={metadataLabels[field]}
+                value={draft[field]}
+                onValueChange={(value) => patch(field, value)}
+                suggestions={field === "tags" ? tags : []}
+                disabled={busy}
               />
-            </label>
-            <div className="playtime-field">
-              <div>
-                <span className="field-label">Playtime</span>
-                <div className="playtime-inputs">
-                  <label>
-                    <input
-                      aria-label="Playtime hours"
-                      name="hours"
-                      type="number"
-                      min="0"
-                      step="1"
-                      defaultValue={
-                        game?.playtimeMinutes === undefined
-                          ? ""
-                          : Math.floor(game.playtimeMinutes / 60)
-                      }
-                      placeholder="0"
-                    />
-                    <small aria-hidden="true">h</small>
-                  </label>
-                  <label>
-                    <input
-                      aria-label="Playtime minutes"
-                      name="minutes"
-                      type="number"
-                      min="0"
-                      max="59"
-                      step="1"
-                      defaultValue={
-                        game?.playtimeMinutes === undefined
-                          ? ""
-                          : game.playtimeMinutes % 60
-                      }
-                      placeholder="0"
-                    />
-                    <small aria-hidden="true">m</small>
-                  </label>
-                </div>
-              </div>
-            </div>
-          </div>
-          <div className="form-rating">
-            <div className="rating-field-heading">
-              <span className="field-label" id="form-rating-label">
-                Rating
-              </span>
-              <span className="muted">
-                {rating ? `${rating} / 10` : "Not rated"}
-              </span>
-            </div>
-            <div
-              className="star-input"
-              role="radiogroup"
-              aria-labelledby="form-rating-label"
-              onMouseLeave={() => setHoverRating(null)}
-            >
-              {Array.from({ length: 10 }, (_, i) => i + 1).map((value) => (
-                <label
-                  key={value}
-                  className={
-                    (hoverRating ?? rating) >= value
-                      ? "star-choice is-filled"
-                      : "star-choice"
-                  }
-                  onMouseEnter={() => setHoverRating(value)}
-                >
-                  <input
-                    type="radio"
-                    name="rating"
-                    value={value}
-                    checked={rating === value}
-                    onChange={() => setRating(value)}
-                    aria-label={`${value} out of 10`}
+            ) : field === "screenshots" ? (
+              <section>
+                <h3 className="field-label">Screenshots</h3>
+                {draft.screenshots.length ? (
+                  <ScreenshotGallery
+                    images={draft.screenshots}
+                    onChange={(value) => patch("screenshots", value)}
                   />
-                  <Star
-                    size={22}
-                    aria-hidden="true"
-                    fill={
-                      (hoverRating ?? rating) >= value ? "currentColor" : "none"
+                ) : (
+                  <p className="muted">No screenshots</p>
+                )}
+              </section>
+            ) : field === "summary" || field === "storyline" ? (
+              <label>
+                {metadataLabels[field]}
+                <textarea
+                  aria-label={metadataLabels[field]}
+                  name={field}
+                  rows={3}
+                  maxLength={20000}
+                  value={draft[field]}
+                  onChange={(event) => patch(field, event.target.value)}
+                />
+              </label>
+            ) : (
+              <label>
+                {metadataLabels[field]}
+                {field === "title" ? (
+                  <input
+                    ref={titleInput}
+                    name="title"
+                    required
+                    maxLength={160}
+                    value={draft.title}
+                    onChange={(event) => patch("title", event.target.value)}
+                  />
+                ) : (
+                  <input
+                    name="releaseDate"
+                    type="date"
+                    value={draft.releaseDate}
+                    onChange={(event) =>
+                      patch("releaseDate", event.target.value)
                     }
                   />
-                </label>
-              ))}
-            </div>
-            <button
-              type="button"
-              className="clear-rating"
-              disabled={!rating}
-              onClick={() => setRating(0)}
-            >
-              Clear rating
-            </button>
+                )}
+              </label>
+            )}
           </div>
-          <label>
-            Review
-            <textarea
-              name="review"
-              defaultValue={game?.review}
-              rows={3}
-              maxLength={10000}
-              placeholder="Your notes about the game"
-            />
-          </label>
-          {error && (
-            <p
-              ref={errorSummary}
-              tabIndex={-1}
-              role="alert"
-              className="error-message"
-            >
-              {error}
-            </p>
-          )}
-        </fieldset>
+        ))}
       </div>
-      {!busy && undo && (
-        <AutofillNotice
-          key={undo.sequence}
-          count={undo.fields.length}
-          onUndo={restoreAutofill}
-          onExpire={clearUndo}
-        />
+    );
+  }
+  return (
+    <div className="game-form-shell">
+      {(!game || panel) && (
+        <div hidden={!panel}>
+          <IgdbAutofill
+            ref={workflow}
+            key={game ? session : "create"}
+            active={panel}
+            draft={{ ...draft, cover: displayedCover }}
+            igdbId={draft.igdbId}
+            create={!game}
+            revisiting={visited}
+            onApply={apply}
+            onManual={(title) => {
+              if (!visited) patch("title", title);
+              setVisited(true);
+              returnToForm();
+            }}
+            onCancel={dismiss}
+            onBack={() => {
+              if (game || visited) returnToForm();
+              else close();
+            }}
+          />
+        </div>
       )}
-      <div className="dialog-actions form-actions" hidden={!!metadataDraft}>
-        <Button
-          type="button"
-          variant="secondary"
-          disabled={busy}
-          onClick={onCancel}
-        >
-          Cancel
-        </Button>
-        <Button type="submit" disabled={busy}>
-          {busy
-            ? image
-              ? "Uploading and saving…"
-              : "Saving…"
-            : game
-              ? "Save changes"
-              : "Create game"}
-        </Button>
-      </div>
-    </form>
+      <form ref={form} onSubmit={submit} className="game-form" hidden={panel}>
+        <div className="workflow-heading">
+          <Button
+            type="button"
+            variant="ghost"
+            disabled={busy}
+            onClick={() => {
+              if (game) dismiss();
+              else setPanel(true);
+            }}
+          >
+            <ChevronLeft size={16} />
+            Back
+          </Button>
+          {game && (
+            <Button
+              ref={updateButton}
+              type="button"
+              variant="secondary"
+              disabled={busy}
+              onClick={() => {
+                setSession((value) => value + 1);
+                setPanel(true);
+              }}
+            >
+              Update metadata
+            </Button>
+          )}
+        </div>
+        <div className="form-fields">
+          <fieldset disabled={busy}>
+            <div className="form-hero">
+              {renderFields(["cover"])}
+              <div className="form-hero-inputs">
+                {renderFields(["title"])}
+                <label>
+                  Status
+                  <Select
+                    name="status"
+                    label="Status"
+                    value={draft.status}
+                    onValueChange={(value) =>
+                      patch("status", value as Game["status"])
+                    }
+                    disabled={busy}
+                    options={statuses.map((status) => ({
+                      value: status,
+                      label: status,
+                    }))}
+                  />
+                </label>
+
+                {draft.availablePlatforms.length > 0 ? (
+                  <div>
+                    <span className="field-label" id="platform-choice-label">
+                      Platforms
+                    </span>
+                    <div
+                      className="platform-choices"
+                      role="group"
+                      aria-labelledby="platform-choice-label"
+                    >
+                      {[
+                        ...new Set([
+                          ...draft.availablePlatforms.map(
+                            (platform) => platform.name,
+                          ),
+                          ...draft.platforms,
+                        ]),
+                      ].map((name) => (
+                        <button
+                          type="button"
+                          aria-pressed={draft.platforms.includes(name)}
+                          key={name}
+                          onClick={() =>
+                            patch(
+                              "platforms",
+                              draft.platforms.includes(name)
+                                ? draft.platforms.filter(
+                                    (platform) => platform !== name,
+                                  )
+                                : [...draft.platforms, name],
+                            )
+                          }
+                        >
+                          {name}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  <TokenInput
+                    name="platforms"
+                    label="Platforms"
+                    value={draft.platforms}
+                    onValueChange={(value) => patch("platforms", value)}
+                    suggestions={platforms}
+                    chips
+                    disabled={busy}
+                  />
+                )}
+              </div>
+            </div>
+            <div className="personal-fields">
+              <div className="form-pair">
+                <div className="playtime-field">
+                  <span className="field-label">Playtime</span>
+                  <div className="playtime-inputs">
+                    <label>
+                      <input
+                        aria-label="Playtime hours"
+                        name="hours"
+                        type="number"
+                        min="0"
+                        step="1"
+                        value={draft.hours}
+                        onChange={(event) => patch("hours", event.target.value)}
+                        placeholder="0"
+                      />
+                      <small>h</small>
+                    </label>
+                    <label>
+                      <input
+                        aria-label="Playtime minutes"
+                        name="minutes"
+                        type="number"
+                        min="0"
+                        max="59"
+                        step="1"
+                        value={draft.minutes}
+                        onChange={(event) =>
+                          patch("minutes", event.target.value)
+                        }
+                        placeholder="0"
+                      />
+                      <small>m</small>
+                    </label>
+                  </div>
+                </div>
+              </div>
+              <div className="form-rating">
+                <div className="rating-field-heading">
+                  <span className="field-label" id="form-rating-label">
+                    Rating
+                  </span>
+                  <span className="muted">
+                    {draft.rating ? `${draft.rating} / 10` : "Not rated"}
+                  </span>
+                </div>
+                <div
+                  className="star-input"
+                  role="radiogroup"
+                  aria-labelledby="form-rating-label"
+                  onMouseLeave={() => setHoverRating(null)}
+                >
+                  {Array.from({ length: 10 }, (_, i) => i + 1).map((value) => (
+                    <label
+                      key={value}
+                      className={
+                        (hoverRating ?? draft.rating) >= value
+                          ? "star-choice is-filled"
+                          : "star-choice"
+                      }
+                      onMouseEnter={() => setHoverRating(value)}
+                    >
+                      <input
+                        type="radio"
+                        name="rating"
+                        value={value}
+                        checked={draft.rating === value}
+                        onChange={() => patch("rating", value)}
+                        aria-label={`${value} out of 10`}
+                      />
+                      <Star
+                        size={22}
+                        aria-hidden="true"
+                        fill={
+                          (hoverRating ?? draft.rating) >= value
+                            ? "currentColor"
+                            : "none"
+                        }
+                      />
+                    </label>
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  className="clear-rating"
+                  disabled={!draft.rating}
+                  onClick={() => patch("rating", 0)}
+                >
+                  Clear rating
+                </button>
+              </div>
+              <label>
+                Review
+                <textarea
+                  aria-label="Review"
+                  name="review"
+                  rows={3}
+                  maxLength={10000}
+                  value={draft.review}
+                  onChange={(event) => patch("review", event.target.value)}
+                />
+              </label>
+              {renderFields(["tags"])}
+            </div>
+            {renderFields([
+              "releaseDate",
+              "developers",
+              "publishers",
+              "summary",
+              "storyline",
+              "screenshots",
+            ])}
+            {(error || uploadError) && (
+              <p
+                ref={errorRef}
+                role="alert"
+                tabIndex={-1}
+                className="error-message"
+              >
+                {error || uploadError}
+              </p>
+            )}
+          </fieldset>
+        </div>
+        <div className="dialog-actions form-actions">
+          <Button
+            type="button"
+            variant="secondary"
+            disabled={busy}
+            onClick={close}
+          >
+            Cancel
+          </Button>
+          <Button type="submit" disabled={busy}>
+            {busy ? "Saving…" : game ? "Save changes" : "Add game"}
+          </Button>
+        </div>
+      </form>
+    </div>
   );
 }

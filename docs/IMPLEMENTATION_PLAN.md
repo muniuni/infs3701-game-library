@@ -24,15 +24,9 @@ No migration of previous in-memory records is required. EBS snapshot instruction
 
 ## Verification
 
-IGDB implementation checks on 2026-10-03 passed 20 unit/integration tests, 14 Chromium E2E tests, lint, typecheck and production build. Tests use synthetic/mocked provider data; live IGDB credentials and EC2 deployment were not validated.
+On 2026-10-10, the redesigned IGDB workflow passed 22 unit/integration tests, 17 Chromium E2E tests, lint, typecheck and production build. The additive migration was also applied successfully to the local database without deleting data. Desktop/mobile form, detail, comparison and screenshot-viewer captures were visually inspected. Unit/integration coverage includes expanded normalization, update-mode semantics, cancellation, unique identity persistence, old records, cover retirement and request size limits. Browser coverage includes create search/preview/form, platform selection, draft preservation, all update modes, linking/cancel, failures, responsive layout and existing library/upload interactions.
 
-| Command                                              | Coverage                                                                                                                                                                                                                                                                                                                                                                             |
-| ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `npm test`                                           | IGDB normalization/token renewal/request pacing/queue bounds/preferences, domain/query behavior, SQLite persistence and uniqueness, optional clearing, local cover persistence/cleanup, storage failure recovery, image validation, request limits and EBS guard rejection                                                                                                           |
-| `npm run test:e2e`                                   | Create autocomplete/wheel scrolling/cancellation/preferences/Undo/upload preservation, Edit automatic search/comparison dismissal/checked defaults/tag merging/URL replacement/provider failure, CRUD, views, drag/rollback, filters/tokens, responsive forms, preview alignment, cover uploads/retry/replacement/cancellation, label suggestions and quick status feedback/rollback |
-| `npm run lint`, `npm run typecheck`, `npm run build` | Static checks and production compilation                                                                                                                                                                                                                                                                                                                                             |
-
-Build before E2E. The suite uses temporary SQLite and local cover files, with no AWS access; default port 3101 can be overridden with `PLAYWRIGHT_PORT`.
+Run `npm test`, `npm run lint`, `npm run typecheck`, `npm run build`, then `PLAYWRIGHT_PORT=3117 npm run test:e2e`. E2E uses temporary SQLite/local covers and mocked provider data. Live IGDB and EC2 deployment verification are separate and remain pending.
 
 ## Phase 8 completion
 
@@ -40,20 +34,21 @@ Cloud deployment and validation were confirmed complete by the owner on 2026-10-
 
 ## Phase 9 IGDB delivered
 
-Implemented server-side IGDB search/details, cached Twitch tokens, a process-wide bounded request queue, response normalization and safe provider errors. Create supports debounced Title autocomplete, immediate selection, genre merging, upload precedence, field preferences and ten-second Undo. Edit supports Autofill beside Title with immediate search, checked comparisons, additive genres and draft-preserving dismissal. Both apply editable draft changes without provider linking or schema changes. URL covers reuse existing CRUD and upload retirement. Steam clients/import, provider identity columns and their migration remain unimplemented.
+The original autofill UI is replaced by search/preview/form creation and ID-based metadata updates. The three update modes default to empty-only and offer replacement/manual selection with a read-only diff. Tags merge, uploaded covers may be replaced, selected platforms remain personal, and ID/platform options are saved with confirmed metadata. Expanded fields include companies, summary, storyline and screenshot references. Old badges/preferences/Undo and title-autocomplete components are removed. Steam import is not implemented.
 
 ### Setup and manual validation
 
-1. Register a Twitch application with two-factor authentication and a Confidential client type; generate its Client ID and Client Secret. IGDB does not use the redirect URL; its setup guide permits `localhost`. See [IGDB setup](https://api-docs.igdb.com/#account-creation).
-2. Set `IGDB_CLIENT_ID` and `IGDB_CLIENT_SECRET` in ignored `.env.local` for development, or the server environment for production. No `NEXT_PUBLIC_` variables or Steam key are needed. Restart `npm run dev`, or rebuild/start production and refresh PM2's environment using the deployment runbook. No new database migration is required.
-3. In Add, type at least three Title characters and select a suggestion with mouse or keyboard. Verify direct draft updates, merged personal Tags, selected-upload precedence and Undo. Adjust Autofill fields, reload and confirm preferences persist. Verify wheel/trackpad scrolling, dismissal and that Cancel writes nothing.
-4. In Edit, change Title and verify no automatic IGDB query. Open Autofill and verify results appear automatically. Select a game, inspect checked current/proposed comparisons and merged Tags. Click outside to return to the draft without closing Edit. Apply selected, then Save/reload. Verify a checked URL-cover replacement retires a prior upload. Without credentials or with failed search, manual Create/Edit must still work.
+1. Configure server-only Twitch application credentials as before. No Steam credentials are required.
+2. Run `npm run db:deploy` to apply the additive IGDB identity migration; it preserves existing data. Rebuild/restart the application after deploying the new code.
+3. Add a game via one-character search, preview and Continue. Select platform chips, edit prose, reorder/remove screenshots, navigate Back and save/reload. Confirm the IGDB identity persists.
+4. Update a linked game after changing its local title. Confirm direct-ID retrieval, empty default, mode changes/manual choices, Tags union, screenshot/company replacement and uploaded-cover retirement only after Save. For a legacy game, select a search match explicitly.
+5. Exercise provider failure, missing optional metadata, duplicate identity/title, explicit Cancel, unsaved-change confirmation, nested viewer dismissal, failed-save retry and narrow-screen/keyboard controls. Real-provider and deployed checks must be reported separately from mocked tests.
 
 ## Phase 9 remaining Steam plan (not implemented)
 
 Steam design decisions were confirmed on 2026-10-02. Steam uses dialog-entered account input and one server-side API key. Every imported field requires checkbox confirmation; missing values default checked, populated replacements default unchecked, and differing existing Steam playtime always requires explicit selection. Separate field preferences persist in local storage. New Steam games default to `PC`/`Unplayed`; unmatched games may import with Steam data alone. See SPEC for complete Steam behavior and DESIGN for its confirmation flow.
 
-1. **Provider clients and identity.** Add a validated server-only Steam client and reuse the delivered IGDB client, token cache and request queue. Add optional persisted provider IDs and unique indexes without changing existing records. Implement Steam account resolution, owned-games fetching, batched IGDB App ID matching and explicit conflict detection.
+1. **Provider clients and identity.** Add a validated server-only Steam client and reuse the delivered IGDB client, token cache and request queue. Reuse persisted IGDB identity; add Steam identity and its unique index without changing existing records. Implement Steam account resolution, owned-games fetching, batched IGDB App ID matching and explicit conflict detection.
 2. **Steam import.** Add read-only preview and bounded commit endpoints. Build account entry, game selection, expandable field comparisons, default-field controls and manual IGDB matching. Recheck current values/identity on commit, save independently through the repository, and expose progress, partial results and safe retry. Preserve personal values unless an offered replacement was explicitly checked.
 3. **Validation and rollout.** Run automated checks below, apply the additive identity migration and configure provider credentials in local/EC2 environments. Verify a real public Steam account, inaccessible game details, IGDB search and a repeat import in the deployed environment. Keep integrations optional when credentials/providers are unavailable; manual CRUD must still work. Update these four docs with delivered status only after implementation and validation.
 
@@ -65,8 +60,10 @@ Steam design decisions were confirmed on 2026-10-02. Steam uses dialog-entered a
 - Browser tests cover separate preferences surviving reload, Steam default controls versus temporary row/game selections, unavailable/corrupt local storage, Steam-only import, manual matching, progress/failure retry, keyboard navigation and narrow-screen layout.
 - Run `npm test`, lint, typecheck, production build and Chromium E2E with isolated SQLite/local covers. Real-provider/deployment checks are separate from mocked acceptance tests.
 
-IGDB autofill has been implemented without schema changes. Live-provider and deployed validation remain pending. Steam import and its migration are still planned.
+IGDB metadata redesign includes the additive IGDB identity migration. Live-provider and deployed validation remain pending. Steam import and its migration are still planned.
 
 ## Phase 10
 
 For Phase 10, review Weeks 1–4 course material, select three justified Going Beyond extensions and record their rationale and evidence. None has been selected.
+
+UI refinement includes stable search/viewer dimensions, unclipped focus outlines, cover-led forms/details, personal fields before metadata, plain company inputs, fixed detail actions and return to the library after creation/editing. Browser checks cover confirmed dismissal persistence, cancellation, validation and retry.
