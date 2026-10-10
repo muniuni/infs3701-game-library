@@ -248,7 +248,9 @@ export function createIgdbClient(options: Options = {}) {
   async function query(
     body: string,
     signal?: AbortSignal,
-  ): Promise<IgdbGame[]> {
+    endpoint = "games",
+    normalize: (data: unknown) => unknown = normalizeIgdbGames,
+  ): Promise<unknown> {
     signal?.throwIfAborted();
     const { clientId, clientSecret } = credentials();
     if (!clientId || !clientSecret)
@@ -280,7 +282,7 @@ export function createIgdbClient(options: Options = {}) {
         signal?.throwIfAborted();
         lastRequest = now();
         const { response, data } = await jsonRequest(
-          "https://api.igdb.com/v4/games",
+          `https://api.igdb.com/v4/${endpoint}`,
           {
             method: "POST",
             headers: {
@@ -318,7 +320,7 @@ export function createIgdbClient(options: Options = {}) {
               : "IGDB search failed. Please try again or enter the game manually.",
             response.status === 429 ? 429 : 502,
           );
-        return normalizeIgdbGames(data);
+        return normalize(data);
       }
     });
     queue = task.then(
@@ -337,13 +339,99 @@ export function createIgdbClient(options: Options = {}) {
       query(
         `${searchFields} search ${JSON.stringify(searchQuerySchema.parse(search))}; limit 20;`,
         signal,
-      ),
+      ) as Promise<IgdbGame[]>,
+    async matchSteam(appIds: number[], signal?: AbortSignal) {
+      const ids = z
+        .array(z.number().int().positive().max(4294967295))
+        .min(1)
+        .max(20)
+        .parse(appIds);
+      const mappings: { uid: string; game: number }[] = [];
+      // Resolve the source by name instead of relying on the deprecated category enum.
+      const sources = (await query(
+        'fields name; where name = "Steam"; limit 10;',
+        signal,
+        "external_game_sources",
+        (data) =>
+          z
+            .array(
+              z.object({ id: z.number().int().positive(), name: z.string() }),
+            )
+            .parse(data),
+      )) as { id: number; name: string }[];
+      const source = sources.find(
+        (item) => item.name.toLowerCase() === "steam",
+      );
+      if (!source)
+        throw new IgdbError(
+          "Steam matching is unavailable. Try again or use Steam data only.",
+        );
+      for (let offset = 0; ; offset += 500) {
+        const page = (await query(
+          `fields uid,game; where external_game_source = ${source.id} & uid = (${ids
+            .map(String)
+            .map((id) => JSON.stringify(id))
+            .join(",")}); limit 500; offset ${offset};`,
+          signal,
+          "external_games",
+          (data) =>
+            z
+              .array(
+                z.object({
+                  uid: z.string(),
+                  game: z.number().int().positive().safe(),
+                }),
+              )
+              .max(500)
+              .parse(data),
+        )) as { uid: string; game: number }[];
+        mappings.push(...page);
+        if (page.length < 500) break;
+        if (offset >= 4500)
+          throw new IgdbError(
+            "Too many IGDB matches. Search for this game manually.",
+          );
+      }
+      const matches = ids.map((appId) => ({
+        appId,
+        ids: [
+          ...new Set(
+            mappings
+              .filter((row) => row.uid === String(appId))
+              .map((row) => row.game),
+          ),
+        ],
+      }));
+      const uniqueIds = [
+        ...new Set(
+          matches
+            .filter((row) => row.ids.length === 1)
+            .flatMap((row) => row.ids),
+        ),
+      ];
+      const games: IgdbGame[] = [];
+      for (let offset = 0; offset < uniqueIds.length; offset += 20)
+        games.push(
+          ...((await query(
+            `${fields} where id = (${uniqueIds.slice(offset, offset + 20).join(",")}); limit 20;`,
+            signal,
+          )) as IgdbGame[]),
+        );
+      return matches.map((row) => ({
+        appId: row.appId,
+        ambiguous: row.ids.length > 1,
+        game:
+          row.ids.length === 1
+            ? games.find((game) => game.id === row.ids[0])
+            : undefined,
+      }));
+    },
     async get(id: string, signal?: AbortSignal) {
       return (
-        await query(
+        (await query(
           `${fields} where id = ${igdbIdSchema.parse(id)}; limit 1;`,
           signal,
-        )
+        )) as IgdbGame[]
       )[0];
     },
   };

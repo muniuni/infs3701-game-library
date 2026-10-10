@@ -18,7 +18,7 @@ import {
   type MetadataMode,
 } from "@/lib/igdb";
 
-function TextDiff({
+export function TextDiff({
   value,
   other,
   after,
@@ -48,7 +48,7 @@ function TextDiff({
     </>
   );
 }
-function Value({
+export function MetadataValue({
   field,
   draft,
   other,
@@ -192,7 +192,7 @@ export function MetadataComparison({
                   )}
                 </th>
                 <td data-label="Before">
-                  <Value
+                  <MetadataValue
                     field={field}
                     draft={draft}
                     other={proposal}
@@ -200,7 +200,12 @@ export function MetadataComparison({
                   />
                 </td>
                 <td data-label="After">
-                  <Value field={field} draft={proposal} other={draft} after />
+                  <MetadataValue
+                    field={field}
+                    draft={proposal}
+                    other={draft}
+                    after
+                  />
                 </td>
               </tr>
             ))}

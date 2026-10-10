@@ -2688,3 +2688,241 @@ dd {
     grid-row: 3;
   }
 }
+
+/* Steam uses the same surfaces, diff table and confirmation as game editing. */
+.steam-dialog {
+  width: min(940px, calc(100vw - 32px));
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100dvh - 32px);
+}
+.steam-dialog:has(.steam-list) {
+  height: min(900px, calc(100dvh - 32px));
+}
+.steam-body {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+}
+.steam-body[hidden] {
+  display: none;
+}
+.steam-account {
+  display: grid;
+  gap: 14px;
+  padding: 5px;
+}
+.steam-account > input {
+  width: 100%;
+}
+.steam-navigation,
+.steam-tools,
+.steam-selection,
+.steam-pagination,
+.steam-row-tools {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.steam-navigation {
+  justify-content: space-between;
+  margin: 0 0 16px;
+}
+.steam-tools {
+  padding: 4px;
+}
+.steam-search {
+  flex: 1;
+  min-width: 180px;
+  position: relative;
+}
+.steam-search > svg {
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-muted);
+}
+.steam-search input {
+  width: 100%;
+  padding-left: 36px;
+}
+.steam-selection {
+  justify-content: space-between;
+  padding: 14px 5px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+.steam-selection label,
+.steam-defaults label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.steam-body input[type="checkbox"] {
+  accent-color: var(--accent);
+  width: 17px;
+  height: 17px;
+  flex-shrink: 0;
+}
+.steam-list {
+  min-height: 160px;
+  overflow-y: auto;
+  flex: 1;
+  padding: 5px;
+  scrollbar-gutter: stable;
+}
+.steam-row {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  margin-bottom: 10px;
+}
+.steam-row.is-selected {
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
+}
+.steam-row-header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px;
+}
+.steam-row-cover {
+  width: 44px;
+  height: 58px;
+  border-radius: 5px;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+.steam-row-cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.steam-row-title {
+  min-width: 0;
+  flex: 1;
+  display: grid;
+  gap: 5px;
+  text-align: left;
+  background: none;
+  border: 0;
+  color: var(--text);
+  cursor: pointer;
+}
+.steam-row-title strong {
+  font-size: 14px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.steam-row-title span {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.steam-row-detail {
+  padding: 8px 16px 16px;
+  border-top: 1px solid var(--border);
+}
+.steam-row-tools {
+  margin: 12px 0 20px;
+}
+.steam-row-detail .metadata-table {
+  table-layout: fixed;
+  width: 100%;
+}
+.steam-row > .error-message {
+  padding: 0 16px 12px;
+}
+.steam-empty {
+  text-align: center;
+  color: var(--text-muted);
+  margin: 60px 0;
+}
+.steam-footer {
+  flex-shrink: 0;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+.steam-defaults {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  padding: 16px;
+  background: var(--surface);
+  border-radius: 10px;
+  font-size: 13px;
+  max-height: 180px;
+  overflow-y: auto;
+}
+.steam-error {
+  font-size: 13px;
+  padding: 8px 4px;
+}
+.steam-error > p {
+  color: var(--danger);
+}
+.steam-pagination {
+  justify-content: center;
+  font-size: 12px;
+  padding-top: 6px;
+}
+.steam-progress {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 42px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+.steam-spinner {
+  animation: loading-spin 0.8s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .steam-spinner {
+    animation: none;
+  }
+}
+@media (max-width: 600px) {
+  .steam-dialog {
+    width: calc(100vw - 16px);
+    padding: 20px 14px;
+  }
+  .steam-dialog:has(.steam-list) {
+    height: calc(100dvh - 24px);
+  }
+  .steam-tools .steam-search {
+    flex-basis: 100%;
+  }
+  .steam-row-header {
+    gap: 10px;
+    padding: 12px 10px;
+  }
+  .steam-row-detail {
+    padding-inline: 10px;
+  }
+  .steam-defaults {
+    grid-template-columns: 1fr 1fr;
+  }
+  .steam-footer {
+    gap: 8px;
+  }
+}
+.steam-row-header .steam-status {
+  width: 135px;
+  flex-shrink: 0;
+}
+@media (max-width: 600px) {
+  .steam-row-header {
+    flex-wrap: wrap;
+  }
+  .steam-row-header .steam-row-title {
+    flex-basis: calc(100% - 110px);
+  }
+  .steam-row-header .steam-status {
+    margin-left: 27px;
+    flex: 1;
+  }
+}

@@ -14,11 +14,13 @@ export interface GameRepository {
   deleteGame(id: string): Promise<boolean>;
 }
 export class DuplicateGameError extends Error {
-  constructor(identity: "title" | "igdb" = "title") {
+  constructor(identity: "title" | "igdb" | "steam" = "title") {
     super(
-      identity === "igdb"
-        ? "This IGDB game is already in your library. Edit the existing game instead."
-        : "A game with this title already exists. Edit its platforms instead.",
+      identity === "steam"
+        ? "This Steam game is already in your library. Reload the import preview."
+        : identity === "igdb"
+          ? "This IGDB game is already in your library. Edit the existing game instead."
+          : "A game with this title already exists. Edit its platforms instead.",
     );
   }
 }
@@ -61,10 +63,20 @@ export class InMemoryGameRepository implements GameRepository {
     )
       throw new DuplicateGameError("igdb");
   }
+  private checkSteam(steamAppId: number | null | undefined, id?: string) {
+    if (
+      steamAppId &&
+      [...this.games.values()].some(
+        (game) => game.id !== id && game.steamAppId === steamAppId,
+      )
+    )
+      throw new DuplicateGameError("steam");
+  }
   async createGame(input: CreateGameInput) {
     const parsed = createGameSchema.parse(input);
     this.checkTitle(parsed.title);
     this.checkIgdb(parsed.igdbId);
+    this.checkSteam(parsed.steamAppId);
     const now = new Date().toISOString();
     const game = {
       ...optionalFields(parsed),
@@ -81,6 +93,7 @@ export class InMemoryGameRepository implements GameRepository {
     if (!previous) return undefined;
     if (parsed.title !== undefined) this.checkTitle(parsed.title, id);
     this.checkIgdb(parsed.igdbId, id);
+    this.checkSteam(parsed.steamAppId, id);
     const game = {
       ...previous,
       ...optionalFields(parsed),

@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { PrismaClient, Prisma } from "../generated/prisma/client";
 import {
   createGameSchema,
@@ -12,6 +12,12 @@ import {
   titleKey,
   type GameRepository,
 } from "./repository";
+import {
+  steamEntrySchema,
+  steamInput,
+  matchSteam,
+  type SteamEntry,
+} from "./steam";
 import type { CoverStorage, ImageUpload } from "./cover-storage";
 
 const json = (game: Game) =>
@@ -44,16 +50,53 @@ export class SqliteGameRepository implements GameRepository {
   async updateGame(id: string, input: UpdateGameInput, image?: ImageUpload) {
     return this.save(id, updateGameSchema.parse(input), image);
   }
+  async importSteam(raw: SteamEntry) {
+    const entry = steamEntrySchema.parse(raw);
+    const fingerprint = createHash("sha256")
+      .update(JSON.stringify(entry))
+      .digest("hex");
+    const receipt = await this.db.steamImportReceipt.findUnique({
+      where: { id: entry.operationId },
+    });
+    if (receipt) {
+      if (receipt.fingerprint !== fingerprint)
+        throw new Error("This import request changed. Review it again.");
+      const game = await this.getGame(receipt.gameId);
+      if (!game)
+        throw new Error("The imported game was deleted. Reload the library.");
+      return game;
+    }
+    const current = entry.targetId
+      ? await this.getGame(entry.targetId)
+      : undefined;
+    if (entry.targetId && !current)
+      throw new Error("This game was deleted. Reload the library.");
+    const match = matchSteam(entry.steam, entry.igdb, await this.listGames());
+    if (
+      match.conflict ||
+      (match.current && match.current.id !== entry.targetId)
+    )
+      throw new Error(
+        "A matching game already exists. Reload the import preview.",
+      );
+    return (await this.save(
+      entry.targetId,
+      steamInput(entry, current),
+      undefined,
+      { entry, fingerprint },
+    ))!;
+  }
   private async save(
     id: string | undefined,
     input: CreateGameInput | UpdateGameInput,
     image?: ImageUpload,
+    importing?: { entry: SteamEntry; fingerprint: string },
   ) {
     let key: string | undefined;
     let retiredKey: string | undefined;
     let putCompleted = false;
     try {
-      if (id && !(await this.getGame(id))) return undefined;
+      if (!importing && id && !(await this.getGame(id))) return undefined;
       if (image) {
         key = `covers/${randomUUID()}`;
         // Register before writing: crashes and ambiguous storage outcomes are recoverable.
@@ -62,11 +105,43 @@ export class SqliteGameRepository implements GameRepository {
         putCompleted = true;
       }
       const saved = await this.db.$transaction(async (tx) => {
+        if (importing) {
+          const receipt = await tx.steamImportReceipt.findUnique({
+            where: { id: importing.entry.operationId },
+          });
+          if (receipt) {
+            if (receipt.fingerprint !== importing.fingerprint)
+              throw new Error("This import request changed. Review it again.");
+            const saved = await tx.game.findUnique({
+              where: { id: receipt.gameId },
+            });
+            if (!saved)
+              throw new Error(
+                "The imported game was deleted. Reload the library.",
+              );
+            return record(saved.data);
+          }
+        }
         const previous = id
           ? await tx.game.findUnique({ where: { id } })
           : null;
+        if (
+          importing &&
+          id &&
+          (!previous ||
+            record(previous.data).updatedAt !==
+              importing.entry.expectedUpdatedAt)
+        )
+          throw new Error(
+            "This game changed after preview. Reload the library before importing.",
+          );
         if (id && !previous) return undefined;
-        const now = new Date().toISOString();
+        const now = new Date(
+          Math.max(
+            Date.now(),
+            previous ? Date.parse(record(previous.data).updatedAt) + 1 : 0,
+          ),
+        ).toISOString();
         const game = {
           ...(previous
             ? record(previous.data)
@@ -90,6 +165,7 @@ export class SqliteGameRepository implements GameRepository {
         const data = {
           titleKey: titleKey(game.title),
           igdbId: game.igdbId ?? null,
+          steamAppId: game.steamAppId ?? null,
           data: json(game),
           coverKey,
         };
@@ -102,6 +178,14 @@ export class SqliteGameRepository implements GameRepository {
             data: { state: "garbage" },
           });
         }
+        if (importing)
+          await tx.steamImportReceipt.create({
+            data: {
+              id: importing.entry.operationId,
+              fingerprint: importing.fingerprint,
+              gameId: game.id,
+            },
+          });
         return game;
       });
       if (!saved && key)
@@ -131,7 +215,11 @@ export class SqliteGameRepository implements GameRepository {
         error.code === "P2002"
       )
         throw new DuplicateGameError(
-          JSON.stringify(error.meta).includes("igdbId") ? "igdb" : "title",
+          JSON.stringify(error.meta).includes("steamAppId")
+            ? "steam"
+            : JSON.stringify(error.meta).includes("igdbId")
+              ? "igdb"
+              : "title",
         );
       throw error;
     }

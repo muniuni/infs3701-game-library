@@ -7,7 +7,7 @@
 | 1–6. Initial application  | Complete: scaffold, validated CRUD, Grid/List/Kanban, dialogs, filters and responsive/accessibility work |
 | 7. EC2 deployment         | Complete, owner-confirmed for the initial application                                                    |
 | 8. Persistent storage     | Complete: application code, cloud deployment and validation; owner-confirmed                             |
-| 9. IGDB and Steam import  | Partial: IGDB autofill implemented; Steam import planned                                                 |
+| 9. IGDB and Steam import  | Implemented locally: IGDB autofill and Steam import; live import validation pending                                                 |
 | 10. Assignment extensions | Not selected or implemented                                                                              |
 
 The active repository uses Prisma/SQLite; new databases start empty and survive process restarts. The original in-memory implementation remains a test double.
@@ -34,35 +34,31 @@ Cloud deployment and validation were confirmed complete by the owner on 2026-10-
 
 ## Phase 9 IGDB delivered
 
-The original autofill UI is replaced by search/preview/form creation and ID-based metadata updates. The three update modes default to empty-only and offer replacement/manual selection with a read-only diff. Tags merge, uploaded covers may be replaced, selected platforms remain personal, and ID/platform options are saved with confirmed metadata. Expanded fields include companies, summary, storyline and screenshot references. Old badges/preferences/Undo and title-autocomplete components are removed. Steam import is not implemented.
+The original autofill UI is replaced by search/preview/form creation and ID-based metadata updates. The three update modes default to empty-only and offer replacement/manual selection with a read-only diff. Tags merge, uploaded covers may be replaced, selected platforms remain personal, and ID/platform options are saved with confirmed metadata. Expanded fields include companies, summary, storyline and screenshot references. Old badges/preferences/Undo and title-autocomplete components are removed. Steam import is delivered below.
 
 UI refinement includes stable search/viewer dimensions, unclipped focus outlines, cover-led forms/details, personal fields before metadata, plain company inputs, fixed detail actions and return to the library after creation/editing. Browser checks cover confirmed dismissal persistence, Cancel-triggered confirmation, stable search loading, validation and retry.
 
 ### Setup and manual validation
 
-1. Configure server-only Twitch application credentials as before. No Steam credentials are required.
+1. Configure server-only Twitch application credentials as before. No Steam credentials are required for IGDB autofill.
 2. Run `npm run db:deploy` to apply the additive IGDB identity migration; it preserves existing data. Rebuild/restart the application after deploying the new code.
 3. Add a game via one-character search, preview and Continue. Select platform chips, edit prose, reorder/remove screenshots, navigate Back and save/reload. Confirm the IGDB identity persists.
 4. Update a linked game after changing its local title. Confirm direct-ID retrieval, empty default, mode changes/manual choices, Tags union, screenshot/company replacement and uploaded-cover retirement only after Save. For a legacy game, select a search match explicitly.
 5. Exercise provider failure, missing optional metadata, duplicate identity/title, explicit Cancel, unsaved-change confirmation, nested viewer dismissal, failed-save retry and narrow-screen/keyboard controls. Real-provider and deployed checks must be reported separately from mocked tests.
 
-## Phase 9 remaining Steam plan (not implemented)
+## Phase 9 Steam delivered
 
-Steam design decisions were confirmed on 2026-10-02. Steam uses dialog-entered account input and one server-side API key. Every imported field requires checkbox confirmation; missing values default checked, populated replacements default unchecked, and differing existing Steam playtime always requires explicit selection. Separate field preferences persist in local storage. New Steam games default to `PC`/`Unplayed`; unmatched games may import with Steam data alone. See SPEC for complete Steam behavior and DESIGN for its confirmation flow.
+Implemented remembered account input, full-library enrichment before a unified selection/review list, global modes with explicit Customize per game, temporary row overrides, inline Status drafts, manual matching, Steam-only fallback and partial-save recovery. Steam ID and global mode are stored in local storage; no account setting is stored in the database. New games default to Steam/Unplayed. Update playtime explicitly selects changed linked records and selects only total playtime for metadata updates while retaining independently edited Status drafts. The additive migration preserves existing data and adds Steam identity plus durable retry receipts. It was applied successfully to the local database without deleting data.
 
-1. **Provider clients and identity.** Add a validated server-only Steam client and reuse the delivered IGDB client, token cache and request queue. Reuse persisted IGDB identity; add Steam identity and its unique index without changing existing records. Implement Steam account resolution, owned-games fetching, batched IGDB App ID matching and explicit conflict detection.
-2. **Steam import.** Add read-only preview and bounded commit endpoints. Build account entry, game selection, expandable field comparisons, default-field controls and manual IGDB matching. Recheck current values/identity on commit, save independently through the repository, and expose progress, partial results and safe retry. Preserve personal values unless an offered replacement was explicitly checked.
-3. **Validation and rollout.** Run automated checks below, apply the additive identity migration and configure provider credentials in local/EC2 environments. Verify a real public Steam account, inaccessible game details, IGDB search and a repeat import in the deployed environment. Keep integrations optional when credentials/providers are unavailable; manual CRUD must still work. Update these four docs with delivered status only after implementation and validation.
+Local verification includes account/URL validation, inaccessible/empty libraries, hidden playtime, retry/error privacy, IGDB external-ID matching, mode safeguards, tag/platform unions, identity conflicts, stale previews and lost-response replay. Chromium scenarios cover new imports, repeat playtime updates, remembered account/global mode, inline Status, mode precedence/restoration, loading bounds, Cancel confirmation, narrow layouts, metadata failure, partial success/retry and IGDB-discovered existing records. Existing IGDB and library scenarios also pass. Latest automated result: 29 unit/integration tests and 23 Chromium E2E tests, plus lint, typecheck and production build. Desktop/mobile import-review screenshots were inspected. These use mocked providers and isolated databases; no real Steam or new EC2 validation is claimed.
 
-### Phase 9 acceptance tests
+### Setup and remaining live validation
 
-- Provider tests with mocked responses cover token expiry, limits/retries/timeouts, invalid account input, vanity URLs, empty/inaccessible libraries, pagination, played free games, App ID mappings and missing/ambiguous metadata. No live provider calls or credentials in automated tests.
-- Repository/API tests cover migration preservation, provider/title conflicts, selected-field-only writes, stale previews, partial batch failures, linking existing records, repeat imports and ambiguous-response retry. Existing upload cleanup works when a URL replaces an uploaded cover.
-- Steam UI/E2E tests cover search/result confirmation, editable previews, per-field comparisons, genres mapped to Tags, upload preservation, default `PC`/`Unplayed`, missing-field defaults, populated replacements and the mandatory unchecked differing-playtime default. Cancellation causes no writes.
-- Browser tests cover separate preferences surviving reload, Steam default controls versus temporary row/game selections, unavailable/corrupt local storage, Steam-only import, manual matching, progress/failure retry, keyboard navigation and narrow-screen layout.
-- Run `npm test`, lint, typecheck, production build and Chromium E2E with isolated SQLite/local covers. Real-provider/deployment checks are separate from mocked acceptance tests.
-
-IGDB metadata redesign includes the additive IGDB identity migration. Live-provider and deployed validation remain pending. Steam import and its migration are still planned.
+1. Set `STEAM_WEB_API_KEY` on the server using a user Web API key from Steam's API-key registration page. Keep existing `IGDB_CLIENT_ID` and `IGDB_CLIENT_SECRET` for enrichment; Steam-only import remains available without IGDB. No `NEXT_PUBLIC_` keys or Steam account environment variable are used.
+2. Apply `npm run db:deploy`, rebuild and restart. `npm run dev` applies migrations automatically; production start does not.
+3. Enter your profile URL/ID64 with public game details. Import a selection and verify Steam identity, metadata, chosen Status and default platform after reload. Reopen Import Steam to verify automatic account loading; exercise Change account and Forget account.
+4. Repeat import after acquiring a game or accumulating playtime. Verify new selection, explicit playtime replacement, personal-field preservation and no duplicates.
+5. Verify unavailable game details and a real IGDB App ID match in the deployed environment. These live checks remain pending.
 
 ## Phase 10
 

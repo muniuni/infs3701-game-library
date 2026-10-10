@@ -35,6 +35,7 @@ export function IgdbAutofill({
   igdbId,
   create,
   revisiting,
+  picker = false,
   active: visible,
   onApply,
   onManual,
@@ -46,6 +47,7 @@ export function IgdbAutofill({
   igdbId?: number;
   create: boolean;
   revisiting: boolean;
+  picker?: boolean;
   active: boolean;
   onApply: (
     next: MetadataDraft,
@@ -200,7 +202,8 @@ export function IgdbAutofill({
         if (resultList.current) resultList.current.scrollTop = scroll.current;
       });
     } else if (screen === "search" && selected && !create) setScreen("compare");
-    else if (screen === "search" && create && !revisiting) onCancel();
+    else if (screen === "search" && create && !revisiting && !picker)
+      onCancel();
     else onBack();
   }
   const feedback = (
@@ -266,7 +269,7 @@ export function IgdbAutofill({
     >
       <div className="workflow-heading">
         <Button type="button" variant="ghost" onClick={back}>
-          {screen === "search" && create && !revisiting ? (
+          {screen === "search" && create && !revisiting && !picker ? (
             "Cancel"
           ) : (
             <>
@@ -348,7 +351,7 @@ export function IgdbAutofill({
             Search
           </Button>
         </div>
-        {create && (
+        {create && !picker && (
           <Button
             type="button"
             variant="ghost"

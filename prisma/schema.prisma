@@ -11,6 +11,7 @@ model Game {
   id       String @id
   titleKey String @unique
   igdbId   Int? @unique
+  steamAppId Int? @unique
   data     Json
   coverKey String? @unique
 }
@@ -21,4 +22,11 @@ model CoverObject {
   state     String
   updatedAt DateTime @updatedAt
   @@index([state, updatedAt])
+}
+
+// Receipts make Steam retries safe after a lost response.
+model SteamImportReceipt {
+  id String @id
+  fingerprint String
+  gameId String
 }

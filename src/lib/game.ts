@@ -12,6 +12,7 @@ export type Cover =
 export type Game = {
   id: string;
   igdbId?: number;
+  steamAppId?: number;
   availablePlatforms?: { id: number; name: string }[];
   developers?: string[];
   publishers?: string[];
@@ -85,6 +86,7 @@ const companies = z
     ),
   );
 const fields = {
+  steamAppId: z.number().int().positive().max(4294967295).nullable().optional(),
   igdbId: z.number().int().positive().safe().nullable().optional(),
   availablePlatforms: z.array(platformSchema).max(100).optional(),
   developers: companies.optional(),

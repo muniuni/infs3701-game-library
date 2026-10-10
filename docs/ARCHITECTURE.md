@@ -16,7 +16,7 @@ Next.js 16 App Router, React 19, TypeScript, Tailwind CSS 4, Radix-based local U
 | `src/lib/mutation-body.ts`                           | Bounded JSON/multipart parsing                                               |
 | `prisma/`, `scripts/`, `deploy/`                     | Schema/migration, startup/migration guards, cleanup and deployment templates |
 
-`GameRepository` exposes list/get/create/update/delete. The active implementation stores validated game JSON plus unique normalized-title, optional IGDB identity and optional cover keys. JSON preserves safe-integer playtime. `CoverObject` tracks pending, attached and garbage objects. The in-memory repository remains a test double; fixtures are not automatically seeded.
+`GameRepository` exposes list/get/create/update/delete. The active implementation stores validated game JSON plus unique normalized-title, optional IGDB/Steam identities and optional cover keys. JSON preserves safe-integer playtime. `CoverObject` tracks pending, attached and garbage objects. The in-memory repository remains a test double; fixtures are not automatically seeded.
 
 ## Storage selection and lifecycle
 
@@ -64,13 +64,21 @@ Game JSON gains availablePlatforms, developers, publishers, summary, storyline a
 
 Screenshots store only validated image IDs and derive thumbnail/full-size HTTPS URLs. They are browser-loaded lazily and are not part of upload cleanup. Approved cover replacement retains the existing transactional retirement path; a draft upload is discarded only when its cover replacement is applied. Provider lookup never writes to the database. Comparison apply prepares a draft; Cancel or a parent dismissal checks the draft against its initial snapshot, including pending comparison values. Changes require explicit Save and close or Discard; Keep editing preserves the draft. Confirmed saves use the same validation/mutation path as Save. Imperative form/workflow handles expose the pending draft without duplicating merge rules. `Library` renders confirmation inside the existing dialog with the alertdialog role, keeping the form mounted but hidden. Keep editing receives initial focus; Escape resumes editing and outside clicks leave confirmation open. Failed writes leave the dialog open. Screenshot dialogs maintain independent dismissal state.
 
-## Phase 9 Steam architecture (planned, not implemented)
+## Phase 9 Steam architecture (implemented)
 
-Add a server-only Steam client with one shared `STEAM_WEB_API_KEY`. Use the public HTTPS host `api.steampowered.com` and `GetOwnedGames`, including app information and played free games. Resolve vanity URLs through Steam's API; accept only valid ID64 or Steam Community profile routes. Distinguish confirmed empty libraries from inaccessible details where possible; otherwise report that access could not be confirmed.
+`server-steam.ts` uses the public HTTPS host `api.steampowered.com` with server-only `STEAM_WEB_API_KEY`. Strict profile parsing extracts ID64 (kept as a string) or a vanity name; it never fetches an arbitrary input URL. ResolveVanityURL precedes GetOwnedGames with app info and played free games. Requests have a 15-second timeout, an 8 MiB response limit and one retry for 429/5xx. Libraries are bounded to 20,000 returned entries. Credentials and upstream URLs are not returned in errors.
 
-Add read-only `POST /api/steam/preview` and bounded `POST /api/steam/import` endpoints. Batch and paginate IGDB enrichment through the shared client, matching Steam App IDs via `external_games.external_game_source`. Allow manual IGDB matching and Steam-only import for unresolved games.
+| Route | Responsibility |
+| --- | --- |
+| POST /api/steam/preview | Read account-visible owned games, names and optional total minutes |
+| POST /api/steam/enrich | Match up to 20 App IDs via IGDB and fetch uniquely matched game details |
+| POST /api/steam/import | Validate and independently commit up to 10 entries with per-row results |
 
-Reuse the implemented IGDB identity and add optional `steamAppId` to game JSON/validation and a nullable unique column in an additive migration. Preserve existing records/title uniqueness and resolve identity conflicts explicitly. On commit recheck identities/current values, apply only confirmed fields and save each game independently through the repository. Return per-row results and retain failed rows for retry. Provider fetches occur outside database transactions. Steam gets its own field-preference map and temporary row overrides; follow SPEC's playtime safeguard.
+The browser enriches the entire returned library in batches of 20 before showing rows and submits one game per save request to stay within the existing 512 KiB body bound. The shared IGDB client resolves the Steam external source, paginates external-game mappings and fetches details in batches using its existing queue, token cache and pacing. Absent/ambiguous matches remain unresolved. Provider fetches happen outside database transactions.
+
+`steam.ts` owns validation, identity matching, proposals, choices and allowed import patches. Import patches allow metadata, platform union, playtime, provider identity and an explicitly supplied Status draft; rating/review stay protected. Omitted Status preserves an existing record. `SteamImport` owns the preview, selection, remembered global mode, temporary row overrides and Status drafts and progress. It reuses IGDB search, diff values and existing dialog primitives. The resolved ID64 is stored only in local storage after an owned-games fetch succeeds, separate from game saving. No account setting is added to SQLite or environment variables. Storage access is guarded; invalid/unavailable data falls back to input. Only the global mode is remembered, with legacy manual mode mapped to Customize per game.
+
+The additive migration adds nullable unique `Game.steamAppId` and `SteamImportReceipt`. Steam identity is synchronized into game JSON. Import rechecks identity candidates and verifies the expected updatedAt inside the save transaction. Each successful operation atomically writes a receipt containing operation UUID, request fingerprint and game ID. A retry with the same payload returns the current saved record without reapplying old values; changed payloads or deleted records are rejected. Existing upload retirement uses the normal transactional cleanup path. The in-memory test repository enforces Steam identity uniqueness as well.
 
 Provider references: [IGDB API](https://api-docs.igdb.com/), [Steam owned games](https://partner.steamgames.com/doc/webapi/IPlayerService?l=english), [Steam API host and authentication](https://partner.steamgames.com/doc/webapi_overview?l=english).
 

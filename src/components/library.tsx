@@ -26,6 +26,7 @@ import {
 } from "./ui/dialog";
 import { GameCover } from "./game-cover";
 import { GameMetadata } from "./game-metadata";
+import { SteamImport } from "./steam-import";
 import { GameForm, type GameFormHandle } from "./game-form";
 import {
   formatPlaytime,
@@ -78,6 +79,8 @@ export function Library() {
     requestAnimationFrame(() => gameForm.current?.focus());
   }
   const gameForm = useRef<GameFormHandle>(null);
+  const [steamOpen, setSteamOpen] = useState(false);
+  const steamButton = useRef<HTMLButtonElement>(null);
   const [dialog, setDialog] = useState<OpenDialog>(null);
   const [busy, setBusy] = useState(false);
   const [dragged, setDragged] = useState<string | null>(null);
@@ -257,6 +260,14 @@ export function Library() {
                 </button>
               )}
             </div>
+            <Button
+              ref={steamButton}
+              variant="secondary"
+              disabled={busy}
+              onClick={() => setSteamOpen(true)}
+            >
+              Import Steam
+            </Button>
             <Button
               ref={addButton}
               onClick={() => open({ mode: "add" })}
@@ -1029,6 +1040,26 @@ export function Library() {
           )}
         </DialogContent>
       </Dialog>
+      {steamOpen && (
+        <SteamImport
+          games={games}
+          onSaved={(saved) => {
+            setGames((previous) => [
+              ...previous.filter(
+                (game) => !saved.some((item) => item.id === game.id),
+              ),
+              ...saved,
+            ]);
+            setNotice({
+              message: `${saved.length} ${saved.length === 1 ? "game" : "games"} imported.`,
+            });
+          }}
+          onClose={() => {
+            setSteamOpen(false);
+            requestAnimationFrame(() => steamButton.current?.focus());
+          }}
+        />
+      )}
       {notice &&
         createPortal(
           <div

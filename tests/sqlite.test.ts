@@ -307,3 +307,59 @@ test("IGDB identity and expanded metadata persist, reject duplicate links and pr
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test("Steam imports persist identity, reject stale previews and replay receipts without overwriting later edits", async () => {
+  const { db, repo, directory } = await setup();
+  try {
+    const operationId = "00000000-0000-4000-8000-000000000001";
+    const entry = {
+      operationId,
+      steam: { appId: 123, title: "Steam game", playtimeMinutes: 60 },
+      choices: { playtimeMinutes: true },
+    };
+    const game = await repo.importSteam(entry);
+    assert.equal(game.steamAppId, 123);
+    assert.deepEqual(game.platforms, ["Steam"]);
+    const edited = await repo.updateGame(game.id, {
+      playtimeMinutes: 150,
+      review: "Manual",
+    });
+    const replay = await repo.importSteam(entry);
+    assert.equal(replay.id, game.id);
+    assert.equal(replay.playtimeMinutes, 150);
+    await assert.rejects(
+      repo.importSteam({
+        ...entry,
+        steam: { ...entry.steam, playtimeMinutes: 90 },
+      }),
+      /request changed/,
+    );
+    await assert.rejects(
+      repo.importSteam({
+        ...entry,
+        operationId: "00000000-0000-4000-8000-000000000002",
+        targetId: game.id,
+        expectedUpdatedAt: game.updatedAt,
+      }),
+      /changed after preview/,
+    );
+    const updated = await repo.importSteam({
+      ...entry,
+      operationId: "00000000-0000-4000-8000-000000000003",
+      targetId: game.id,
+      expectedUpdatedAt: edited!.updatedAt,
+      steam: { ...entry.steam, playtimeMinutes: 200 },
+    });
+    assert.equal(updated.playtimeMinutes, 200);
+    assert.equal(updated.review, "Manual");
+    await assert.rejects(
+      repo.createGame({ ...input("Other Steam title"), steamAppId: 123 }),
+      DuplicateGameError,
+    );
+    assert.equal(await db.game.count(), 1);
+    assert.equal(await db.steamImportReceipt.count(), 2);
+  } finally {
+    await db.$disconnect();
+    await rm(directory, { recursive: true, force: true });
+  }
+});

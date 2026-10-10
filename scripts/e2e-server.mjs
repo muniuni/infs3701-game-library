@@ -8,6 +8,7 @@ const env = {
   ...process.env,
   NODE_ENV: "production",
   // Provider UI tests intercept requests; never use real credentials or APIs.
+  STEAM_WEB_API_KEY: "",
   IGDB_CLIENT_ID: "",
   IGDB_CLIENT_SECRET: "",
   STORAGE_MODE: "local",
