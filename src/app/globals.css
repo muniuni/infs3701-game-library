@@ -740,9 +740,10 @@ dd {
   }
   .heading-actions {
     width: 100%;
+    flex-wrap: wrap;
   }
-  .search-field {
-    flex: 1;
+  .heading-actions > .search-field {
+    flex: 1 1 100%;
     min-width: 0;
   }
   .search-field input {

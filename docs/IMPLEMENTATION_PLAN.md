@@ -68,6 +68,10 @@ Implemented lazy role-based retrieval of both provider secrets in `us-east-1`, a
 
 On 2026-10-10, validation passed 34 unit/integration tests, 23 Chromium E2E tests, lint, typecheck, production build and `git diff --check`. Credential tests cover local source selection, production precedence, secret names, caching/expiry, concurrent reads, malformed/missing values, retry after failure, provider error sanitization and IGDB token renewal after secret rotation. Live EC2 role access, Secrets Manager reads and real-provider behavior remain pending.
 
+## JSON library export
+
+Implemented Import / Export with the existing Steam workflow and full-library JSON downloads. Export now requires confirmation in the shared compact dialog, with Cancel/Export JSON, in-dialog retry and focus restoration. Export uses a fresh repository snapshot and an explicit field list excluding images, image URLs, storage keys, internal IDs and secrets. Optional values, arrays, personal records and external provider IDs follow the version 1 contract in SPEC. Browser checks cover downloads under filtering, records added after page load, empty libraries, keyboard/mobile use, export retry and the existing Steam workflow. On 2026-10-11, validation passed 36 unit/integration tests, 26 Chromium E2E tests, lint, typecheck, production build and `git diff --check`. Desktop/mobile menu screenshots were inspected. The confirmation follow-up passed 10 targeted export/Steam Chromium tests, lint, typecheck, production build and `git diff --check`; desktop/mobile confirmation screenshots were inspected. Cancellation tests verify no export request or download before confirmation and focus restoration. Live deployment validation remains pending.
+
 ## Phase 10
 
 For Phase 10, review Weeks 1–4 course material, select three justified Going Beyond extensions and record their rationale and evidence. None has been selected.

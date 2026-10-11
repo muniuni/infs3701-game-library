@@ -12,7 +12,12 @@ const metadata = {
   availablePlatforms: [{ id: 6, name: "PC" }],
 };
 async function open(page: Page, first = true) {
-  await page.getByRole("button", { name: "Import Steam", exact: true }).click();
+  await page
+    .getByRole("button", { name: "Import / Export", exact: true })
+    .click();
+  await page
+    .getByRole("menuitem", { name: "Import from Steam", exact: true })
+    .click();
   if (first) {
     await expect(page.getByLabel("Steam profile URL or ID64")).toBeFocused();
     await page

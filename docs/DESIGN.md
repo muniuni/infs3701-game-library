@@ -14,7 +14,7 @@ Dark-only, cover-focused library with Jersey 10 headings/wordmark, Manrope funct
 
 Orange marks primary actions, focus and active drop targets; red marks errors/deletion. Status/tag chips are neutral and labelled. Controls, cards and dialogs use rounded corners and subtle surfaces/borders. Buttons have 150ms color transitions, disabled for reduced motion.
 
-The sticky header contains the wordmark, Library heading, title search and Add Game. View/sort controls and result counts sit above content, with a left filter sidebar. In-memory and restart-loss notices are removed.
+The sticky header contains the wordmark, Library heading, title search, Import / Export and Add Game. View/sort controls and result counts sit above content, with a left filter sidebar. In-memory and restart-loss notices are removed.
 
 ## Views and dialogs
 
@@ -61,7 +61,7 @@ Search feedback stays inside the results region, sized to the smaller of 380px o
 
 ## Phase 9 Steam interaction (implemented)
 
-Import Steam is a secondary action beside Add Game. With no saved account, its profile URL/ID64 input receives focus. A successful library fetch remembers the resolved account ID in local storage; future openings load it directly. Change account returns to input and Forget account removes the saved ID. Failed loads offer Retry without erasing the saved account.
+Import from Steam is the first item in the Import / Export dropdown beside Add Game. With no saved account, its profile URL/ID64 input receives focus. A successful library fetch remembers the resolved account ID in local storage; future openings load it directly. Change account returns to input and Forget account removes the saved ID. Failed loads offer Retry without erasing the saved account.
 
 Owned-games retrieval, full-library IGDB enrichment and identity matching precede a single selection/review list. A viewport-bounded dialog up to 940px wide reserves its list area during loading, using skeletons and progress. Incomplete metadata offers retry or explicit continuation with missing values. No preliminary selection screen or Continue step remains.
 
@@ -70,3 +70,7 @@ Rows show selection, cover, title, New/Existing/link/conflict state, playtime an
 Expanding a row shows the shared Field/Before/After table and manual IGDB matching. The global Import split menu offers Update if empty, Replace current data and Customize per game. Individual update controls are hidden in the first two modes. Customize per game exposes each row's three IGDB update modes, with field checkboxes only in Select manually. First entry inherits the preceding global mode; returning to global mode preserves temporary per-game settings for restoration. Only the global mode is remembered across sessions; Default fields is removed. Status edits are independent of these metadata controls.
 
 The fixed footer pairs Cancel with Import N games. Saving displays progress and blocks dismissal. Partial failure shows per-row errors, Retry and Reload library. Dismissal uses Review import / Discard / Keep editing; Review import returns to the retained list without saving. Nested viewers and select menus dismiss independently.
+
+## Import / Export menu
+
+The secondary Import / Export button has a downward chevron and opens an anchored keyboard-accessible menu with Import from Steam and Export library (JSON). Steam retains its existing dialog workflow. Export opens an Export library? confirmation using the existing compact dialog, title, description and button styles. Cancel receives initial focus; Export JSON starts the download of all saved games, including when no filtered results are visible or the library is empty. Cancel, Close and Escape dismiss without requesting an export and return focus to the menu trigger. While fetching, Exporting… is shown and dismissal/actions are disabled; failure stays in the dialog with Retry export. On mobile the title search occupies its own row above the two action buttons. No export settings are added.

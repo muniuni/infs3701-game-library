@@ -92,6 +92,12 @@ The additive migration adds nullable unique `Game.steamAppId` and `SteamImportRe
 
 Provider references: [IGDB API](https://api-docs.igdb.com/), [Steam owned games](https://partner.steamgames.com/doc/webapi/IPlayerService?l=english), [Steam API host and authentication](https://partner.steamgames.com/doc/webapi_overview?l=english).
 
+## JSON library export
+
+`GET /api/games/export` is a dynamic Node route that reads the full repository without filter parameters. `library-export.ts` explicitly projects allowed metadata and personal fields, including external provider/platform IDs and record timestamps. It never spreads raw records or serializes cover/screenshot fields. The response is formatted JSON with schema version 1, an ISO UTC timestamp, count and games; attachment filename uses the same UTC date. Responses use `no-store`; successful downloads also use `nosniff`.
+
+The header uses a Radix dropdown and the shared Dialog components for export confirmation. Only confirming Export JSON (or Retry export within that dialog) starts the request. Export fetches the attachment, downloads a Blob using the server filename, and revokes its object URL. It does not use the filtered or cached browser game list. Duplicate export clicks are blocked while pending; failures keep the confirmation open with Retry export without clearing the library. Dismissal is blocked during the request; otherwise Cancel, Close and Escape cancel without fetching. Steam opens the existing workflow and restores focus to the menu trigger on close. No schema migration or AWS permission change is needed.
+
 ## Deployment status
 
 Phase 7 deployment is owner-confirmed on Amazon Linux 2023 at `/home/ec2-user/infs3701-game-library`. The documented environment uses Nginx on port 80 and PM2 with one Next.js process on `127.0.0.1:3000`.

@@ -101,6 +101,14 @@ IGDB and Steam credentials remain server-only. Production defaults to AWS Secret
 
 Local development retains `.env`/`.env.local` support. Set `SECRETS_SOURCE=env` for local production-build testing; set `SECRETS_SOURCE=aws` for EC2. AWS mode never falls back to environment credentials. No credential values are sent to the browser or persisted with games. See [Architecture](ARCHITECTURE.md#server-credentials) for configuration details.
 
+## JSON library export
+
+Import / Export offers Import from Steam and Export library (JSON). Selecting Export library (JSON) first opens a confirmation with Cancel and Export JSON. No export request or download starts before confirmation; dismissing cancels it. Export downloads every saved game from a fresh server snapshot regardless of search, filters or view. Empty libraries export successfully. The filename is `game-library-YYYY-MM-DD.json`, using the UTC date of `exportedAt`.
+
+The JSON envelope contains `schemaVersion: 1`, ISO UTC `exportedAt`, `gameCount` and `games`. Each game includes title, platforms, tags, releaseDate, status, playtimeMinutes, rating, review, igdbId, steamAppId, availablePlatforms (external IGDB platform ID/name), developers, publishers, summary, storyline, createdAt and updatedAt. Arrays retain their structure/order and explicit nulls remain null; missing scalar optional values become null and missing optional arrays become empty arrays. Zero playtime and empty strings remain intact.
+
+Cover data, screenshots and their image identifiers/URLs, S3 keys, internal game IDs, import receipts, credentials and account settings are excluded. Export does not modify records. JSON import is not included.
+
 ## Out of scope
 
 Authentication, multiple users, social features, recommendations, scheduled store/account sync and dedicated game pages. Phase 9 adds manual Steam import only; RAWG integration is not planned.

@@ -1,8 +1,10 @@
 "use client";
+import { DropdownMenu } from "radix-ui";
 import { createPortal } from "react-dom";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Check,
+  ChevronDown,
   Save,
   Columns3,
   Clock3,
@@ -81,6 +83,42 @@ export function Library() {
   const gameForm = useRef<GameFormHandle>(null);
   const [steamOpen, setSteamOpen] = useState(false);
   const steamButton = useRef<HTMLButtonElement>(null);
+  const [exporting, setExporting] = useState(false);
+  const [exportConfirmOpen, setExportConfirmOpen] = useState(false);
+  const exportCancel = useRef<HTMLButtonElement>(null);
+  const [exportError, setExportError] = useState("");
+  const exportLock = useRef(false);
+  async function exportLibrary() {
+    if (exportLock.current || !exportConfirmOpen) return;
+    exportLock.current = true;
+    setExporting(true);
+    setExportError("");
+    try {
+      const response = await fetch("/api/games/export", { cache: "no-store" });
+      if (!response.ok) throw new Error();
+      const filename = response.headers
+        .get("Content-Disposition")
+        ?.match(/filename="(game-library-\d{4}-\d{2}-\d{2}\.json)"/)?.[1];
+      if (!filename) throw new Error();
+      const url = URL.createObjectURL(await response.blob());
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      try {
+        link.click();
+      } finally {
+        link.remove();
+        window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+      }
+      setExportConfirmOpen(false);
+    } catch {
+      setExportError("Could not export the library. Please try again.");
+    } finally {
+      exportLock.current = false;
+      setExporting(false);
+    }
+  }
   const [dialog, setDialog] = useState<OpenDialog>(null);
   const [busy, setBusy] = useState(false);
   const [dragged, setDragged] = useState<string | null>(null);
@@ -260,14 +298,45 @@ export function Library() {
                 </button>
               )}
             </div>
-            <Button
-              ref={steamButton}
-              variant="secondary"
-              disabled={busy}
-              onClick={() => setSteamOpen(true)}
-            >
-              Import Steam
-            </Button>
+            <DropdownMenu.Root>
+              <DropdownMenu.Trigger asChild>
+                <Button
+                  ref={steamButton}
+                  variant="secondary"
+                  disabled={busy || exporting}
+                >
+                  {exporting ? "Exporting…" : "Import / Export"}
+                  <ChevronDown size={16} aria-hidden="true" />
+                </Button>
+              </DropdownMenu.Trigger>
+              <DropdownMenu.Portal>
+                <DropdownMenu.Content
+                  className="metadata-menu"
+                  align="end"
+                  sideOffset={6}
+                  collisionPadding={12}
+                  onCloseAutoFocus={(event) => {
+                    if (steamOpen || exportConfirmOpen) event.preventDefault();
+                  }}
+                >
+                  <DropdownMenu.Item
+                    className="metadata-menu-item"
+                    onSelect={() => setSteamOpen(true)}
+                  >
+                    Import from Steam
+                  </DropdownMenu.Item>
+                  <DropdownMenu.Item
+                    className="metadata-menu-item"
+                    onSelect={() => {
+                      setExportError("");
+                      setExportConfirmOpen(true);
+                    }}
+                  >
+                    Export library (JSON)
+                  </DropdownMenu.Item>
+                </DropdownMenu.Content>
+              </DropdownMenu.Portal>
+            </DropdownMenu.Root>
             <Button
               ref={addButton}
               onClick={() => open({ mode: "add" })}
@@ -1038,6 +1107,53 @@ export function Library() {
               </Button>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+      <Dialog
+        open={exportConfirmOpen}
+        onOpenChange={(open) => {
+          if (!exportLock.current) setExportConfirmOpen(open);
+        }}
+      >
+        <DialogContent
+          className="unsaved-dialog"
+          busy={exporting}
+          onOpenAutoFocus={(event) => {
+            event.preventDefault();
+            exportCancel.current?.focus();
+          }}
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            steamButton.current?.focus();
+          }}
+        >
+          <DialogTitle className="dialog-title">Export library?</DialogTitle>
+          <DialogDescription className="dialog-description">
+            Download all saved games as JSON, regardless of filters. Images are
+            not included.
+          </DialogDescription>
+          {exportError && (
+            <p role="alert" className="error-message">
+              {exportError}
+            </p>
+          )}
+          <div className="dialog-actions">
+            <Button
+              ref={exportCancel}
+              variant="secondary"
+              disabled={exporting}
+              onClick={() => setExportConfirmOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button disabled={exporting} onClick={() => void exportLibrary()}>
+              {exporting
+                ? "Exporting…"
+                : exportError
+                  ? "Retry export"
+                  : "Export JSON"}
+            </Button>
+          </div>
         </DialogContent>
       </Dialog>
       {steamOpen && (
