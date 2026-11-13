@@ -93,7 +93,8 @@ log "packages installed: node $(node --version), npm $(npm --version)"
 if ! swapon --show=NAME --noheadings | grep -q .; then
   dd if=/dev/zero of=/swapfile bs=1M count=2048 status=none
   chmod 600 /swapfile
-  mkswap -q /swapfile
+  # AL2023's util-linux mkswap has no -q/--quiet option.
+  mkswap /swapfile >/dev/null
   swapon /swapfile
   log "2 GiB swap enabled"
 fi
