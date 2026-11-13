@@ -32,7 +32,26 @@ const optionalFields = (input: CreateGameInput | UpdateGameInput) =>
     ]),
   );
 
-export class SqliteGameRepository implements GameRepository {
+/**
+ * Maps a unique violation on a Game identity column to the duplicate the user
+ * sees. Other unique violations (e.g. a Steam import receipt written by a
+ * concurrent retry) are not duplicate games and are left to the caller.
+ */
+export function duplicateIdentity(error: unknown) {
+  if (
+    !(error instanceof Prisma.PrismaClientKnownRequestError) ||
+    error.code !== "P2002" ||
+    error.meta?.modelName !== "Game"
+  )
+    return undefined;
+  const meta = JSON.stringify(error.meta);
+  if (meta.includes("steamAppId")) return "steam" as const;
+  if (meta.includes("igdbId")) return "igdb" as const;
+  if (meta.includes("titleKey")) return "title" as const;
+  return undefined;
+}
+
+export class PrismaGameRepository implements GameRepository {
   constructor(
     public db: PrismaClient,
     private storage: CoverStorage,
@@ -55,17 +74,8 @@ export class SqliteGameRepository implements GameRepository {
     const fingerprint = createHash("sha256")
       .update(JSON.stringify(entry))
       .digest("hex");
-    const receipt = await this.db.steamImportReceipt.findUnique({
-      where: { id: entry.operationId },
-    });
-    if (receipt) {
-      if (receipt.fingerprint !== fingerprint)
-        throw new Error("This import request changed. Review it again.");
-      const game = await this.getGame(receipt.gameId);
-      if (!game)
-        throw new Error("The imported game was deleted. Reload the library.");
-      return game;
-    }
+    const replayed = await this.replayReceipt(entry.operationId, fingerprint);
+    if (replayed) return replayed;
     const current = entry.targetId
       ? await this.getGame(entry.targetId)
       : undefined;
@@ -79,12 +89,33 @@ export class SqliteGameRepository implements GameRepository {
       throw new Error(
         "A matching game already exists. Reload the import preview.",
       );
-    return (await this.save(
-      entry.targetId,
-      steamInput(entry, current),
-      undefined,
-      { entry, fingerprint },
-    ))!;
+    try {
+      return (await this.save(
+        entry.targetId,
+        steamInput(entry, current),
+        undefined,
+        { entry, fingerprint },
+      ))!;
+    } catch (error) {
+      // A concurrent retry of the same operation (e.g. on another instance)
+      // committed first, so this attempt hit a unique constraint. Return the
+      // committed result instead of reporting a duplicate.
+      const replayed = await this.replayReceipt(entry.operationId, fingerprint);
+      if (replayed) return replayed;
+      throw error;
+    }
+  }
+  private async replayReceipt(operationId: string, fingerprint: string) {
+    const receipt = await this.db.steamImportReceipt.findUnique({
+      where: { id: operationId },
+    });
+    if (!receipt) return undefined;
+    if (receipt.fingerprint !== fingerprint)
+      throw new Error("This import request changed. Review it again.");
+    const game = await this.getGame(receipt.gameId);
+    if (!game)
+      throw new Error("The imported game was deleted. Reload the library.");
+    return game;
   }
   private async save(
     id: string | undefined,
@@ -210,17 +241,8 @@ export class SqliteGameRepository implements GameRepository {
           .catch(() => {});
         await this.tryCleanup([key]);
       }
-      if (
-        error instanceof Prisma.PrismaClientKnownRequestError &&
-        error.code === "P2002"
-      )
-        throw new DuplicateGameError(
-          JSON.stringify(error.meta).includes("steamAppId")
-            ? "steam"
-            : JSON.stringify(error.meta).includes("igdbId")
-              ? "igdb"
-              : "title",
-        );
+      const identity = duplicateIdentity(error);
+      if (identity) throw new DuplicateGameError(identity);
       throw error;
     }
   }

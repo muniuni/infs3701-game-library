@@ -1,17 +1,24 @@
 import { execFileSync } from "node:child_process";
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
+import { mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { PrismaBetterSqlite3 } from "@prisma/adapter-better-sqlite3";
-import { PrismaClient } from "../src/generated/prisma/client";
-import { SqliteGameRepository } from "../src/lib/sqlite-game-repository";
+import { createDatabase } from "../src/lib/database";
+import {
+  PrismaGameRepository,
+  duplicateIdentity,
+} from "../src/lib/prisma-game-repository";
 import { LocalCoverStorage } from "../src/lib/local-cover-storage";
 import { DuplicateGameError } from "../src/lib/repository";
 import { createGameSchema } from "../src/lib/game";
 import type { CoverStorage, ImageUpload } from "../src/lib/cover-storage";
-import { assertStorage, storageConfig } from "../scripts/storage-config.mjs";
+import {
+  LOCAL_DATABASE_URL,
+  assertStorage,
+  storageConfig,
+} from "../scripts/storage-config.mjs";
+import { createTestDatabase } from "../scripts/test-database.mjs";
 
 class FakeStorage implements CoverStorage {
   objects = new Map<string, ImageUpload>();
@@ -35,34 +42,30 @@ const image = {
 };
 const input = (title = "Example") =>
   createGameSchema.parse({ title, playtimeMinutes: Number.MAX_SAFE_INTEGER });
+// Each test gets its own migrated database on the local Docker PostgreSQL.
 async function setup() {
   const directory = await mkdtemp(join(tmpdir(), "library-test-"));
-  const url = `file:${join(directory, "test.sqlite")}`;
-  const connect = () =>
-    new PrismaClient({ adapter: new PrismaBetterSqlite3({ url }) });
+  const database = await createTestDatabase();
+  const connect = () => createDatabase(database.url);
   const db = connect();
-  for (const directory of (await readdir("prisma/migrations"))
-    .filter((name) => /^\d/.test(name))
-    .sort()) {
-    const migration = await readFile(
-      `prisma/migrations/${directory}/migration.sql`,
-      "utf8",
-    );
-    for (const sql of migration.split(";").filter((sql) => sql.trim()))
-      await db.$executeRawUnsafe(sql);
-  }
   const storage = new FakeStorage();
   return {
     db,
     storage,
     connect,
     directory,
-    repo: new SqliteGameRepository(db, storage),
+    url: database.url,
+    repo: new PrismaGameRepository(db, storage),
+    async cleanup() {
+      await db.$disconnect();
+      await database.drop();
+      await rm(directory, { recursive: true, force: true });
+    },
   };
 }
 
-test("SQLite persists across connections, enforces normalized uniqueness and preserves optional fields", async () => {
-  const { db, repo, storage, connect, directory } = await setup();
+test("PostgreSQL persists across connections, enforces normalized uniqueness and preserves optional fields", async () => {
+  const { db, repo, storage, connect, url, cleanup } = await setup();
   try {
     const created = await repo.createGame(input("Ｆoo  Bar"));
     await assert.rejects(repo.createGame(input("foo bar")), DuplicateGameError);
@@ -80,9 +83,8 @@ test("SQLite persists across connections, enforces normalized uniqueness and pre
         "--input-type=module",
         "-e",
         `
-      import { PrismaClient } from './src/generated/prisma/client.ts';
-      import { PrismaBetterSqlite3 } from '@prisma/adapter-better-sqlite3';
-      const db = new PrismaClient({adapter: new PrismaBetterSqlite3({url: process.env.TEST_DATABASE_URL})});
+      import { createDatabase } from './src/lib/database.ts';
+      const db = createDatabase(process.env.TEST_GAME_DATABASE_URL);
       console.log(JSON.stringify((await db.game.findUnique({where: {id: process.env.TEST_GAME_ID}})).data));
       await db.$disconnect();
     `,
@@ -91,7 +93,7 @@ test("SQLite persists across connections, enforces normalized uniqueness and pre
         encoding: "utf8",
         env: {
           ...process.env,
-          TEST_DATABASE_URL: `file:${join(directory, "test.sqlite")}`,
+          TEST_GAME_DATABASE_URL: url,
           TEST_GAME_ID: created.id,
         },
       },
@@ -99,7 +101,7 @@ test("SQLite persists across connections, enforces normalized uniqueness and pre
     assert.equal(JSON.parse(persisted).title, "Ｆoo  Bar");
     const reopened = connect();
     try {
-      const next = new SqliteGameRepository(reopened, storage);
+      const next = new PrismaGameRepository(reopened, storage);
       const saved = await next.getGame(created.id);
       assert.equal(saved?.rating, 10);
       assert.equal(saved?.playtimeMinutes, Number.MAX_SAFE_INTEGER);
@@ -121,13 +123,12 @@ test("SQLite persists across connections, enforces normalized uniqueness and pre
       await reopened.$disconnect();
     }
   } finally {
-    await db.$disconnect();
-    await rm(directory, { recursive: true, force: true });
+    await cleanup();
   }
 });
 
 test("cover save, preservation, replacements and deletion clean up only retired objects", async () => {
-  const { db, repo, storage, directory } = await setup();
+  const { db, repo, storage, cleanup } = await setup();
   try {
     const game = await repo.createGame(input(), image);
     assert.equal(game.cover.type, "upload");
@@ -158,13 +159,12 @@ test("cover save, preservation, replacements and deletion clean up only retired 
     assert.equal(storage.objects.size, 0);
     assert.equal(await db.coverObject.count(), 0);
   } finally {
-    await db.$disconnect();
-    await rm(directory, { recursive: true, force: true });
+    await cleanup();
   }
 });
 
 test("failed saves, ambiguous uploads and failed deletes retain recoverable cleanup records", async () => {
-  const { db, repo, storage, connect, directory } = await setup();
+  const { db, repo, storage, connect, cleanup } = await setup();
   try {
     const game = await repo.createGame(input(), image);
     await assert.rejects(repo.createGame(input(), image), DuplicateGameError);
@@ -184,7 +184,7 @@ test("failed saves, ambiguous uploads and failed deletes retain recoverable clea
     const nextDb = connect();
     try {
       storage.failDelete = false;
-      const next = new SqliteGameRepository(nextDb, storage);
+      const next = new PrismaGameRepository(nextDb, storage);
       await next.cleanup();
       assert.equal(storage.objects.size, 0);
       // Crash before attaching: only expired pending uploads are swept.
@@ -209,40 +209,43 @@ test("failed saves, ambiguous uploads and failed deletes retain recoverable clea
       await nextDb.$disconnect();
     }
   } finally {
-    await db.$disconnect();
-    await rm(directory, { recursive: true, force: true });
+    await cleanup();
   }
 });
 
-test("storage configuration rejects missing EBS identity and root-volume fallback", () => {
+test("storage mode selects covers only and the database is always PostgreSQL", () => {
+  assert.deepEqual(storageConfig({}), {
+    mode: "local",
+    url: LOCAL_DATABASE_URL,
+  });
+  assert.equal(storageConfig({ NODE_ENV: "production" }).mode, "s3");
   assert.equal(
-    storageConfig({
-      STORAGE_MODE: "local",
-      DATABASE_URL: "file:/tmp/test.sqlite",
-    }).mode,
-    "local",
+    storageConfig({ STORAGE_MODE: "s3", DATABASE_URL: "postgres://h/db" }).url,
+    "postgres://h/db",
   );
-  assert.throws(() => storageConfig({ DATABASE_URL: "file:relative.sqlite" }));
-  assert.throws(() =>
-    assertStorage({
-      STORAGE_MODE: "ebs",
-      DATABASE_URL: "file:/tmp/test.sqlite",
-    }),
+  assert.throws(() => storageConfig({ STORAGE_MODE: "ebs" }), /local or s3/);
+  assert.throws(
+    () => storageConfig({ DATABASE_URL: "file:/tmp/test.sqlite" }),
+    /postgresql/,
   );
-  assert.throws(() => assertStorage({ STORAGE_MODE: "ebs" }));
+  // Production never falls back to the local Docker database.
+  assert.throws(
+    () => assertStorage({ NODE_ENV: "production" }),
+    /DATABASE_URL is required/,
+  );
 });
 
-test("SQLite saves, failed saves, replacements and deletion manage local cover files", async () => {
-  const { db, directory } = await setup();
+test("PostgreSQL saves, failed saves, replacements and deletion manage local cover files", async () => {
+  const { db, directory, cleanup } = await setup();
   const covers = join(directory, "covers");
-  const repo = new SqliteGameRepository(db, new LocalCoverStorage(covers));
+  const repo = new PrismaGameRepository(db, new LocalCoverStorage(covers));
   try {
     const game = await repo.createGame(input(), image);
     const firstFiles = await readdir(covers);
     assert.equal(firstFiles.length, 1);
     await assert.rejects(repo.createGame(input(), image), DuplicateGameError);
     assert.deepEqual(await readdir(covers), firstFiles);
-    const next = new SqliteGameRepository(db, new LocalCoverStorage(covers));
+    const next = new PrismaGameRepository(db, new LocalCoverStorage(covers));
     assert.deepEqual(await next.getCover(firstFiles[0].slice(0, -4)), image);
     assert.deepEqual(
       (await next.updateGame(game.id, { title: "Edited" }))?.cover,
@@ -259,13 +262,12 @@ test("SQLite saves, failed saves, replacements and deletion manage local cover f
     assert.deepEqual(await readdir(covers), []);
     assert.equal(await db.coverObject.count(), 0);
   } finally {
-    await db.$disconnect();
-    await rm(directory, { recursive: true, force: true });
+    await cleanup();
   }
 });
 
 test("IGDB identity and expanded metadata persist, reject duplicate links and preserve old records", async () => {
-  const { db, repo, connect, storage, directory } = await setup();
+  const { db, repo, connect, storage, cleanup } = await setup();
   try {
     const legacy = await repo.createGame(input("Legacy"));
     assert.equal(legacy.igdbId, undefined);
@@ -292,7 +294,7 @@ test("IGDB identity and expanded metadata persist, reject duplicate links and pr
     await db.$disconnect();
     const reopened = connect();
     try {
-      const persisted = await new SqliteGameRepository(
+      const persisted = await new PrismaGameRepository(
         reopened,
         storage,
       ).getGame(legacy.id);
@@ -303,13 +305,12 @@ test("IGDB identity and expanded metadata persist, reject duplicate links and pr
       await reopened.$disconnect();
     }
   } finally {
-    await db.$disconnect();
-    await rm(directory, { recursive: true, force: true });
+    await cleanup();
   }
 });
 
 test("Steam imports persist identity, reject stale previews and replay receipts without overwriting later edits", async () => {
-  const { db, repo, directory } = await setup();
+  const { db, repo, cleanup } = await setup();
   try {
     const operationId = "00000000-0000-4000-8000-000000000001";
     const entry = {
@@ -359,7 +360,78 @@ test("Steam imports persist identity, reject stale previews and replay receipts 
     assert.equal(await db.game.count(), 1);
     assert.equal(await db.steamImportReceipt.count(), 2);
   } finally {
-    await db.$disconnect();
-    await rm(directory, { recursive: true, force: true });
+    await cleanup();
+  }
+});
+
+test("concurrent retries of one Steam import return the committed game instead of a duplicate error", async () => {
+  const { repo, connect, storage, db, cleanup } = await setup();
+  // A second client stands in for another app instance behind the ALB.
+  const otherDb = connect();
+  const other = new PrismaGameRepository(otherDb, storage);
+  try {
+    const entry = {
+      operationId: "00000000-0000-4000-8000-000000000010",
+      steam: { appId: 456, title: "Concurrent", playtimeMinutes: 10 },
+      choices: { playtimeMinutes: true },
+    };
+    const [first, second] = await Promise.all([
+      repo.importSteam(entry),
+      other.importSteam(entry),
+    ]);
+    assert.equal(first.id, second.id);
+    assert.equal(await db.game.count(), 1);
+    // Same for an update import racing on an existing game.
+    const update = {
+      ...entry,
+      operationId: "00000000-0000-4000-8000-000000000011",
+      targetId: first.id,
+      expectedUpdatedAt: first.updatedAt,
+      steam: { ...entry.steam, playtimeMinutes: 20 },
+    };
+    const updates = await Promise.all([
+      repo.importSteam(update),
+      other.importSteam(update),
+    ]);
+    assert.deepEqual(
+      updates.map((game) => game.playtimeMinutes),
+      [20, 20],
+    );
+    assert.equal(await db.steamImportReceipt.count(), 2);
+  } finally {
+    await otherDb.$disconnect();
+    await cleanup();
+  }
+});
+
+test("only Game identity conflicts map to duplicate-game messages", async () => {
+  const { db, cleanup } = await setup();
+  try {
+    await db.game.create({
+      data: { id: "a", titleKey: "a", igdbId: 1, steamAppId: 2, data: {} },
+    });
+    const conflict = (data: Parameters<typeof db.game.create>[0]["data"]) =>
+      db.game.create({ data }).then(
+        () => assert.fail("expected a unique violation"),
+        (error: unknown) => duplicateIdentity(error),
+      );
+    assert.equal(await conflict({ id: "b", titleKey: "a", data: {} }), "title");
+    assert.equal(
+      await conflict({ id: "c", titleKey: "c", igdbId: 1, data: {} }),
+      "igdb",
+    );
+    assert.equal(
+      await conflict({ id: "d", titleKey: "d", steamAppId: 2, data: {} }),
+      "steam",
+    );
+    await db.steamImportReceipt.create({
+      data: { id: "r", fingerprint: "f", gameId: "a" },
+    });
+    const receipt = await db.steamImportReceipt
+      .create({ data: { id: "r", fingerprint: "f", gameId: "a" } })
+      .catch((error: unknown) => error);
+    assert.equal(duplicateIdentity(receipt), undefined);
+  } finally {
+    await cleanup();
   }
 });

@@ -63,7 +63,7 @@ test("local cover files persist across storage instances with the correct conten
   }
 });
 
-test("storage mode chooses filesystem covers locally and S3 for EBS", () => {
+test("storage mode chooses filesystem covers locally and S3 otherwise", () => {
   assert.ok(createCoverStorage("local") instanceof LocalCoverStorage);
-  assert.ok(createCoverStorage("ebs") instanceof S3CoverStorage);
+  assert.ok(createCoverStorage("s3") instanceof S3CoverStorage);
 });

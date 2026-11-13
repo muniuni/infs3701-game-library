@@ -2,7 +2,7 @@
 
 ## Stack and code boundaries
 
-Next.js 16 App Router, React 19, TypeScript, Tailwind CSS 4, Radix-based local UI components, Zod, Prisma with the better-sqlite3 adapter, Sharp and AWS SDK v3. Fonts are bundled through Fontsource. Node.js 20.19+, 22.12+ or 24+ is supported; EC2 uses Node.js 24.
+Next.js 16 App Router, React 19, TypeScript, Tailwind CSS 4, Radix-based local UI components, Zod, Prisma with the `pg` driver adapter (PostgreSQL), Sharp and AWS SDK v3. Fonts are bundled through Fontsource. Node.js 20.19+, 22.12+ or 24+ is supported; EC2 uses Node.js 24.
 
 | Location                                             | Responsibility                                                               |
 | ---------------------------------------------------- | ---------------------------------------------------------------------------- |
@@ -10,8 +10,8 @@ Next.js 16 App Router, React 19, TypeScript, Tailwind CSS 4, Radix-based local U
 | `src/lib/game.ts`, `library-query.ts`                | Domain validation and browser-side queries                                   |
 | `src/app/api/`                                       | Dynamic Node.js CRUD and cover delivery routes                               |
 | `src/lib/server-repository.ts`, `database.ts`        | Lazy process-wide repository and guarded database connection                 |
-| `src/lib/sqlite-game-repository.ts`                  | Prisma CRUD, title uniqueness and cover cleanup ledger                       |
-| `src/lib/server-cover-storage.ts`                    | Local/EBS backend selection                                                  |
+| `src/lib/prisma-game-repository.ts`                  | Prisma CRUD, title uniqueness and cover cleanup ledger                       |
+| `src/lib/server-cover-storage.ts`                    | Local/S3 cover backend selection                                             |
 | `src/lib/local-cover-storage.ts`, `cover-storage.ts` | Filesystem/S3 objects and image validation                                   |
 | `src/lib/mutation-body.ts`                           | Bounded JSON/multipart parsing                                               |
 | `prisma/`, `scripts/`, `deploy/`                     | Schema/migration, startup/migration guards, cleanup and deployment templates |
@@ -20,11 +20,13 @@ Next.js 16 App Router, React 19, TypeScript, Tailwind CSS 4, Radix-based local U
 
 ## Storage selection and lifecycle
 
-`STORAGE_MODE` overrides the default: local outside production, EBS in production. Local defaults are `data/game-library.sqlite` and `data/covers/`; `DATABASE_URL` requires an absolute `file:` path, and `LOCAL_COVERS_DIR` overrides the image directory. Cover files use UUID names and `.jpg`, `.png` or `.webp` extensions. Local mode does not instantiate S3 or require AWS credentials.
+The database is always PostgreSQL, reached through `DATABASE_URL` (a `postgresql://` URL). Outside production it defaults to the Docker database in `compose.yaml`; in production it is required and has no default, so an instance never falls back to a local database. On AWS the URL is built at runtime from the RDS-managed secret (see `docs/GROUP_ARCHITECTURE.md`, D8). Migrations are a single PostgreSQL baseline; `prisma migrate deploy` takes an advisory lock, so instances booting together apply it once.
 
-EBS mode requires `/mnt/game-library-data/game-library.sqlite`, Linux, `EBS_VOLUME_UUID`, an exact filesystem mount and a device distinct from the root filesystem. These checks run before opening SQLite or applying migrations. Database journals remain beside the database. S3 defaults to `infs3701-game-library-images` in `us-east-1`; `S3_BUCKET` and `AWS_REGION` can override them. The SDK uses its credential chain; EC2 configuration calls for an instance role.
+`STORAGE_MODE` only selects where covers live: `local` (default outside production) or `s3` (default in production). Local covers default to `data/covers/`, and `LOCAL_COVERS_DIR` overrides the directory. Cover files use UUID names and `.jpg`, `.png` or `.webp` extensions. Local mode does not instantiate S3 or require AWS credentials. S3 defaults to `infs3701-game-library-images` in `us-east-1`; `S3_BUCKET` and `AWS_REGION` can override them. The SDK uses its credential chain; EC2 configuration calls for an instance role.
 
 An upload ledger entry is created before writing the object. A database transaction attaches the new cover and retires the previous one. Failed saves attempt object cleanup; ambiguous write failures retain a pending entry for later cleanup. Committed edits are not rolled back when deletion fails.
+
+PostgreSQL runs these transactions at its default Read Committed isolation, where SQLite ran one write at a time. With several app instances, two concurrent edits of the same game resolve as last write wins. That is accepted for a single-user library. Steam imports stay idempotent: if a concurrent retry of the same operation commits first, the losing attempt hits a unique constraint, finds the committed receipt and returns that game. Only unique violations on `Game` identity columns (title, IGDB ID, Steam app ID) are reported to the user as duplicate games.
 
 Mutations attempt deletion of their own retired objects. `npm run covers:cleanup` processes up to 100 garbage objects and retires pending uploads older than 24 hours. Local cleanup is manual. The production timer runs two minutes after boot and five minutes after the previous run ends.
 
@@ -86,7 +88,7 @@ Screenshots store only validated image IDs and derive thumbnail/full-size HTTPS 
 
 The browser enriches the entire returned library in batches of 20 before showing rows and submits one game per save request to stay within the existing 512 KiB body bound. The shared IGDB client resolves the Steam external source, paginates external-game mappings and fetches details in batches using its existing queue, token cache and pacing. Absent/ambiguous matches remain unresolved. Provider fetches happen outside database transactions.
 
-`steam.ts` owns validation, identity matching, proposals, choices and allowed import patches. Import patches allow metadata, platform union, playtime, provider identity and an explicitly supplied Status draft; rating/review stay protected. Omitted Status preserves an existing record. `SteamImport` owns the preview, selection, remembered global mode, temporary row overrides and Status drafts and progress. It reuses IGDB search, diff values and existing dialog primitives. The resolved ID64 is stored only in local storage after an owned-games fetch succeeds, separate from game saving. No account setting is added to SQLite or environment variables. Storage access is guarded; invalid/unavailable data falls back to input. Only the global mode is remembered, with legacy manual mode mapped to Customize per game.
+`steam.ts` owns validation, identity matching, proposals, choices and allowed import patches. Import patches allow metadata, platform union, playtime, provider identity and an explicitly supplied Status draft; rating/review stay protected. Omitted Status preserves an existing record. `SteamImport` owns the preview, selection, remembered global mode, temporary row overrides and Status drafts and progress. It reuses IGDB search, diff values and existing dialog primitives. The resolved ID64 is stored only in local storage after an owned-games fetch succeeds, separate from game saving. No account setting is added to the database or environment variables. Storage access is guarded; invalid/unavailable data falls back to input. Only the global mode is remembered, with legacy manual mode mapped to Customize per game.
 
 The additive migration adds nullable unique `Game.steamAppId` and `SteamImportReceipt`. Steam identity is synchronized into game JSON. Import rechecks identity candidates and verifies the expected updatedAt inside the save transaction. Each successful operation atomically writes a receipt containing operation UUID, request fingerprint and game ID. Browser operation IDs use `browser-uuid.ts`: native `crypto.randomUUID()` when available, otherwise UUID v4 built with `crypto.getRandomValues()` for HTTP deployments. ID creation occurs inside per-row error handling, and retries retain the original ID. A retry with the same payload returns the current saved record without reapplying old values; changed payloads or deleted records are rejected. Existing upload retirement uses the normal transactional cleanup path. The in-memory test repository enforces Steam identity uniqueness as well.
 
@@ -102,6 +104,6 @@ The header uses a Radix dropdown and the shared Dialog components for export con
 
 Phase 7 deployment is owner-confirmed on Amazon Linux 2023 at `/home/ec2-user/infs3701-game-library`. The documented environment uses Nginx on port 80 and PM2 with one Next.js process on `127.0.0.1:3000`.
 
-Phase 8 cloud deployment and validation are complete, owner-confirmed on 2026-10-02. The [deployment runbook](../deploy/README.md) and supplied PM2, EBS mount, IAM and cleanup configurations remain operational references. EBS snapshots exclude S3 object contents.
+Phase 8 cloud deployment and validation are complete, owner-confirmed on 2026-10-02. That single-instance SQLite/EBS deployment ([runbook](../deploy/README.md), PM2, EBS mount, IAM and cleanup configurations) is kept as the individual-assignment reference and no longer matches the code. The group deployment is described in [GROUP_ARCHITECTURE.md](GROUP_ARCHITECTURE.md).
 
-`npm ci` generates Prisma Client. `npm run dev` applies migrations first; `npm run build` generates the client and builds with webpack. `npm start` checks storage but does not apply migrations. Local production-build testing requires `STORAGE_MODE=local`, as provided in `.env.example`.
+`npm ci` generates Prisma Client. `npm run dev` applies migrations first; `npm run build` generates the client and builds with webpack. `npm start` checks the storage configuration but does not apply migrations. Local production-build testing requires `STORAGE_MODE=local` and a running Docker PostgreSQL; `.env.example` sets the mode.

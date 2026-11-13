@@ -172,8 +172,11 @@ Each decision lists what we chose, why, and what we gave up. The numbered user a
   - **Migrations:** replace the SQLite migration history with a fresh PostgreSQL baseline migration. There is no data to migrate, since every rebuild starts empty.
   - **Remove the SQLite/EBS guards:**
     - In `scripts/storage-config.mjs` and `scripts/check-storage.mjs`, drop the `file:` URL requirement, the EBS mount checks and `EBS_VOLUME_UUID`.
-    - `STORAGE_MODE` keeps only its role of choosing local vs S3 covers.
+    - `STORAGE_MODE` keeps only its role of choosing local vs S3 covers. Its values are renamed from `local | ebs` to **`local | s3`**, with `s3` the production default, so the env file written by `bootstrap.sh` sets `STORAGE_MODE=s3` (decided in S1).
+    - `DATABASE_URL` must be a `postgresql://` URL. Outside production it defaults to the Docker database; in production it has no default, so an instance can never fall back to a local database.
   - **Repository class:** rename `src/lib/sqlite-game-repository.ts` to a Prisma repository. Its transaction logic stays as it is.
+    - **Isolation level (noted in S1):** SQLite ran one write at a time, while PostgreSQL defaults to Read Committed. With several instances, two concurrent edits of the same game resolve as last write wins. That is accepted for a single-user app and is not changed.
+    - **Duplicate-error fix (S1):** only unique violations on `Game` identity columns map to the user-facing duplicate messages. When a retry of the same Steam import runs concurrently on two instances, the losing attempt now finds the committed receipt and returns that game. Before, it reported "A game with this title already exists".
   - **DB wrapper:** a small Node wrapper (e.g. `scripts/with-database-url.mjs`) reads the RDS-managed secret with the AWS SDK. It builds `DATABASE_URL` in memory (URL-encoding the password, adding `sslmode=verify-full` and the CA path) and then runs the given command. Both `prisma migrate deploy` and `next start` run through it, so the password is never written to disk or into user data.
   - **Local development:** PostgreSQL in Docker via `compose.yaml`. `.env.example` is updated, and tests that used a real SQLite file run against the local Postgres.
 - **Why:** one Prisma schema can only target one database provider, and production must be PostgreSQL. Docker is already installed for local dev. Keeping the credentials out of files matches the individual assignment's secrets-handling stance.
@@ -277,7 +280,7 @@ Each decision lists what we chose, why, and what we gave up. The numbered user a
 
 - **Demo data:** start with an empty library every rebuild. Games are added live in the video (search IGDB, add a game, upload a cover). No seed step.
 - **Cover cleanup:** each instance runs the existing cleanup (`npm run covers:cleanup`) from a systemd timer every 5 minutes, through the DB wrapper. Concurrent runs on several instances are harmless: S3 deletes are idempotent and the ledger delete is conditional.
-- **Steam import:** keep it and restore the API routes. In the working tree, `src/app/api/steam/{preview,enrich,import}/route.ts` show as deleted, but the deletion was never committed: the files exist in `HEAD` (added in `fe1218b`), there is no stash, and `src/components/steam-import.tsx` and `tests/e2e/steam.spec.ts` still call those routes. It looks accidental (the folder was last changed on 16 Oct). Restore with `git restore src/app/api/steam` in S1.
+- **Steam import:** keep it and restore the API routes. In the working tree, `src/app/api/steam/{preview,enrich,import}/route.ts` show as deleted, but the deletion was never committed: the files exist in `HEAD` (added in `fe1218b`), there is no stash, and `src/components/steam-import.tsx` and `tests/e2e/steam.spec.ts` still call those routes. It looks accidental (the folder was last changed on 16 Oct). Restored in S1 (14 Nov); all 7 Steam e2e tests passed on SQLite before the port and on PostgreSQL after it.
 - **Known limitation, IGDB pacing:** the 260 ms spacing between IGDB calls is enforced per process, so with N instances the combined rate can reach N times the single-instance rate and IGDB may return 429s. These are retried once and then reported to the user. The production fix is a shared rate limiter, e.g. a token bucket in a shared store. Documented, not built.
 
 ### Answers recorded from the design session
@@ -337,6 +340,7 @@ Rough order of magnitude: **~$170/month**, with the NAT gateways the largest sha
 | Boot-to-healthy time | Timestamps in `cloud-init-output.log` and target health | Tune grace/warmup; if far too slow, consider building once and sharing the build output via S3 (needs a group decision) |
 | Prisma advisory lock with 2 instances migrating together | Both instances boot cleanly; `_prisma_migrations` has one row per migration | Only the first instance migrates (e.g. a lock row), or migrate from `deploy.sh` |
 | Single t3.small capacity | Load test (D6) | — (this sets the scaling target) |
+| RDS offers the PostgreSQL major version used locally (18) on `db.t3.micro` | `aws rds describe-orderable-db-instance-options --engine postgres --engine-version 18.4 --db-instance-class db.t3.micro` | Use the newest major that is offered, and change `compose.yaml` to match |
 | Template size within the 51,200-byte inline limit | `aws cloudformation validate-template` | Upload the template to an S3 bucket first |
 | Secrets after a Reset | Second rebuild succeeds | Generated names already avoid clashes (D10) |
 | Node.js version on AL2023 | `dnf list nodejs*` | Install via `nvm` |
@@ -399,14 +403,15 @@ Each session is a separate Claude Code session that starts by reading this docum
 
 ### S1. Data tier port and Steam restore (no AWS)
 
-- [ ] `git restore src/app/api/steam` and confirm the Steam e2e tests pass on SQLite before changing anything else.
-- [ ] Add `compose.yaml` with PostgreSQL (the same major version as RDS) for local dev and tests.
-- [ ] Switch `prisma/schema.prisma` to `postgresql`. Replace `prisma/migrations/` with a fresh Postgres baseline migration.
-- [ ] Replace `@prisma/adapter-better-sqlite3` with `@prisma/adapter-pg` and `pg` in `src/lib/database.ts`.
-- [ ] Remove the `file:`/EBS guards from `scripts/storage-config.mjs`, `scripts/check-storage.mjs` and `scripts/migrate.mjs`. `STORAGE_MODE` only selects local vs S3 covers.
-- [ ] Rename `src/lib/sqlite-game-repository.ts` → `prisma-game-repository.ts` and update imports. Check that the unique-constraint error mapping (P2002) still reports title/IGDB/Steam conflicts.
-- [ ] Adapt `tests/sqlite.test.ts` and any test that opened a SQLite file to the local Postgres. Update `.env.example`, `README.md` and `docs/ARCHITECTURE.md` (storage sections).
-- **Done when:** `npm run lint`, `npm run typecheck`, `npm test` and `npm run test:e2e` all pass against Docker Postgres.
+- [x] `git restore src/app/api/steam` and confirm the Steam e2e tests pass on SQLite before changing anything else.
+- [x] Add `compose.yaml` with PostgreSQL (the same major version as RDS) for local dev and tests. Uses `postgres:18`; confirming that RDS offers 18 on `db.t3.micro` is a §6 row for S3.
+- [x] Switch `prisma/schema.prisma` to `postgresql`. Replace `prisma/migrations/` with a fresh Postgres baseline migration (`20261114000000_postgres_baseline`).
+- [x] Replace `@prisma/adapter-better-sqlite3` with `@prisma/adapter-pg` and `pg` in `src/lib/database.ts`.
+- [x] Remove the `file:`/EBS guards from `scripts/storage-config.mjs`, `scripts/check-storage.mjs` and `scripts/migrate.mjs`. `STORAGE_MODE` only selects local vs S3 covers, now `local | s3` (D8). `scripts/e2e-server.mjs` was also SQLite-specific and was ported; `prisma.config.ts` needed no change.
+- [x] Rename `src/lib/sqlite-game-repository.ts` → `prisma-game-repository.ts` and update imports. Check that the unique-constraint error mapping (P2002) still reports title/IGDB/Steam conflicts. Also fixed the concurrent-import misreport (D8).
+- [x] Adapt `tests/sqlite.test.ts` (now `tests/prisma-repository.test.ts`) and any test that opened a SQLite file to the local Postgres. Each unit test gets its own migrated database (`scripts/test-database.mjs`). Update `.env.example`, `README.md` and `docs/ARCHITECTURE.md` (storage sections).
+- **Done when:** `npm run lint`, `npm run typecheck`, `npm test` and `npm run test:e2e` all pass against Docker Postgres. **Done 14 Nov:** lint and typecheck clean, 38/38 unit tests, 27/27 e2e tests.
+- Left for S2: `ecosystem.config.cjs` and `deploy/` still describe the SQLite/EBS/PM2 deployment.
 
 ### S2. Runtime glue for AWS (no AWS)
 

@@ -1,49 +1,33 @@
-import { mkdirSync, realpathSync, statSync } from "node:fs";
-import { execFileSync } from "node:child_process";
-import { resolve, dirname } from "node:path";
+// Default for the local Docker PostgreSQL in compose.yaml. Local only.
+export const LOCAL_DATABASE_URL =
+  "postgresql://game_library:game_library@localhost:5432/game_library";
 
-/** @param {Record<string, string | undefined>} env */
+/**
+ * STORAGE_MODE only chooses where covers live: local files or S3.
+ * The database is always PostgreSQL, located by DATABASE_URL.
+ * @param {Record<string, string | undefined>} env
+ */
 export function storageConfig(env = process.env) {
-  const mode =
-    env.STORAGE_MODE || (env.NODE_ENV === "production" ? "ebs" : "local");
-  if (!["local", "ebs"].includes(mode))
-    throw new Error("STORAGE_MODE must be local or ebs.");
-  const url =
-    env.DATABASE_URL ||
-    (mode === "ebs"
-      ? "file:/mnt/game-library-data/game-library.sqlite"
-      : `file:${resolve("data/game-library.sqlite")}`);
-  if (!url.startsWith("file:/") || url.includes("?") || url.includes("#"))
-    throw new Error(
-      "DATABASE_URL must be an absolute file: path without query parameters.",
-    );
-  return { mode, url, path: url.slice(5) };
+  const production = env.NODE_ENV === "production";
+  const mode = env.STORAGE_MODE || (production ? "s3" : "local");
+  if (!["local", "s3"].includes(mode))
+    throw new Error("STORAGE_MODE must be local or s3.");
+  // Production has no default: the RDS URL is built at runtime (S2 wrapper).
+  const url = env.DATABASE_URL || (production ? undefined : LOCAL_DATABASE_URL);
+  if (url && !/^postgres(ql)?:\/\//.test(url))
+    throw new Error("DATABASE_URL must be a postgresql:// connection URL.");
+  return { mode, url };
 }
 
 /** @param {Record<string, string | undefined>} env */
 export function assertStorage(env = process.env) {
   const config = storageConfig(env);
-  if (config.mode === "ebs") {
-    const mount = "/mnt/game-library-data";
-    if (config.path !== `${mount}/game-library.sqlite`)
-      throw new Error(
-        "EBS mode requires /mnt/game-library-data/game-library.sqlite.",
-      );
-    if (process.platform !== "linux" || !env.EBS_VOLUME_UUID)
-      throw new Error("EBS mode requires Linux and EBS_VOLUME_UUID.");
-    const uuid = execFileSync(
-      "findmnt",
-      ["--noheadings", "--raw", "--mountpoint", mount, "--output", "UUID"],
-      { encoding: "utf8" },
-    ).trim();
-    if (
-      uuid !== env.EBS_VOLUME_UUID ||
-      realpathSync(mount) !== mount ||
-      statSync(mount).dev === statSync("/").dev
-    )
-      throw new Error(
-        "Expected separate EBS filesystem is not mounted. Refusing to open SQLite.",
-      );
-  } else mkdirSync(dirname(config.path), { recursive: true });
-  return config;
+  if (!config.url) throw new Error("DATABASE_URL is required in production.");
+  return { ...config, url: config.url };
+}
+
+/** Host, port and database for logs. Never includes credentials. */
+export function describeDatabase(url) {
+  const parsed = new URL(url);
+  return `${parsed.hostname}:${parsed.port || 5432}${parsed.pathname}`;
 }
