@@ -5,6 +5,7 @@ import "@fontsource/manrope/latin-500.css";
 import "@fontsource/manrope/latin-600.css";
 import "@fontsource/manrope/latin-700.css";
 import "./globals.css";
+import { ServedBy } from "@/components/served-by";
 export const metadata: Metadata = {
   title: "Game Library",
   description: "Your personal game collection.",
@@ -14,7 +15,10 @@ export default function RootLayout({
 }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en" className="dark">
-      <body>{children}</body>
+      <body>
+        {children}
+        <ServedBy />
+      </body>
     </html>
   );
 }

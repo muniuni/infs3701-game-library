@@ -21,11 +21,15 @@ npm run build
 npm start
 ```
 
-The example `.env` sets `STORAGE_MODE=local` and `SECRETS_SOURCE=env` for local production-build testing. IGDB and Steam credentials can be supplied through `.env`/`.env.local`; EC2 uses `SECRETS_SOURCE=aws` to retrieve both provider secrets from Secrets Manager in `us-east-1` through its instance role. The group deployment (RDS PostgreSQL Multi-AZ, S3 covers) is described in [docs/GROUP_ARCHITECTURE.md](docs/GROUP_ARCHITECTURE.md). The single-instance SQLite/EBS runbook in [deploy/README.md](deploy/README.md) is kept as the individual-assignment reference and no longer matches the code.
+The example `.env` sets `STORAGE_MODE=local` and `SECRETS_SOURCE=env` for local production-build testing. IGDB and Steam credentials can be supplied through `.env`/`.env.local`; EC2 uses `SECRETS_SOURCE=aws` to retrieve both provider secrets from Secrets Manager in `us-east-1` through its instance role.
+
+## AWS deployment
+
+The group deployment (2–4 instances behind an HTTPS ALB, RDS PostgreSQL Multi-AZ, S3 covers) is designed in [docs/GROUP_ARCHITECTURE.md](docs/GROUP_ARCHITECTURE.md). Each instance runs [infra/bootstrap.sh](infra/bootstrap.sh) at boot: it builds the app, applies migrations and starts Nginx plus the systemd units in [infra/](infra/). Processes that use the database run through `scripts/with-database-url.mjs`, which builds `DATABASE_URL` in memory from the RDS-managed secret. TLS to RDS is verified against the CA in `DATABASE_CA_FILE`. `GET /api/health` is the shallow load-balancer health check. Responses carry `X-Served-By`, and a footer badge shows the instance and AZ. Instances clone the repo from GitHub, so push app and `infra/` changes before deploying. The runtime is summarised in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#group-runtime-on-ec2). The individual-assignment SQLite/EBS runbook is kept in [deploy/individual/](deploy/individual/README.md) for reference and no longer matches the code.
 
 ## API
 
-`GET/POST /api/games`, `GET/PATCH/DELETE /api/games/:id`, and `GET /api/covers/:id`.
+`GET/POST /api/games`, `GET/PATCH/DELETE /api/games/:id`, `GET /api/covers/:id`, and `GET /api/health` (always 200, no database access).
 
 POST/PATCH accept JSON or multipart `input` JSON plus one `cover` file. Supported images are JPEG, PNG and WebP, up to 5 MiB and 40 megapixels, still images only. The server owns uploaded references. Omitting `cover` on PATCH preserves it; placeholder/URL replacements retire the previous object. Optional fields clear with `null`; duplicate normalized titles return 409. Invalid input returns 400 and oversized requests return 413.
 

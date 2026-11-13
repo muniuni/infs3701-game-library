@@ -14,13 +14,19 @@ Next.js 16 App Router, React 19, TypeScript, Tailwind CSS 4, Radix-based local U
 | `src/lib/server-cover-storage.ts`                    | Local/S3 cover backend selection                                             |
 | `src/lib/local-cover-storage.ts`, `cover-storage.ts` | Filesystem/S3 objects and image validation                                   |
 | `src/lib/mutation-body.ts`                           | Bounded JSON/multipart parsing                                               |
-| `prisma/`, `scripts/`, `deploy/`                     | Schema/migration, startup/migration guards, cleanup and deployment templates |
+| `src/app/api/health/`, `src/components/served-by.tsx` | Shallow ALB health check and the instance/AZ footer badge                   |
+| `prisma/`, `scripts/`                                | Schema/migration, startup/migration guards, DB connection settings, cleanup  |
+| `scripts/with-database-url.mjs`, `database-config.mjs` | AWS: DATABASE_URL from the RDS-managed secret; TLS settings for pg and Prisma |
+| `infra/`                                             | Instance bootstrap, Nginx and systemd units for the group AWS deployment     |
+| `deploy/individual/`                                 | Individual-assignment PM2/EBS runbook (reference only, no longer matches)    |
 
 `GameRepository` exposes list/get/create/update/delete. The active implementation stores validated game JSON plus unique normalized-title, optional IGDB/Steam identities and optional cover keys. JSON preserves safe-integer playtime. `CoverObject` tracks pending, attached and garbage objects. The in-memory repository remains a test double; fixtures are not automatically seeded.
 
 ## Storage selection and lifecycle
 
-The database is always PostgreSQL, reached through `DATABASE_URL` (a `postgresql://` URL). Outside production it defaults to the Docker database in `compose.yaml`; in production it is required and has no default, so an instance never falls back to a local database. On AWS the URL is built at runtime from the RDS-managed secret (see `docs/GROUP_ARCHITECTURE.md`, D8). Migrations are a single PostgreSQL baseline; `prisma migrate deploy` takes an advisory lock, so instances booting together apply it once.
+The database is always PostgreSQL, reached through `DATABASE_URL` (a `postgresql://` URL). Outside production it defaults to the Docker database in `compose.yaml`; in production it is required and has no default, so an instance never falls back to a local database. On AWS the URL is built at runtime from the RDS-managed secret (see `docs/GROUP_ARCHITECTURE.md`, D8): `scripts/with-database-url.mjs` reads `username` and `password` from the secret in `DB_SECRET_ARN`, takes host, port and database from `DB_HOST`, `DB_PORT` and `DB_NAME`, and passes the URL only to the command it starts (the app, migrations and cleanup). Without `DB_SECRET_ARN` it runs the command unchanged.
+
+TLS is configured by `DATABASE_CA_FILE`, never by URL parameters (`scripts/database-config.mjs`). The pg adapter gets `ssl: { ca, rejectUnauthorized: true }`, which checks the chain and the host name. Prisma Migrate gets its own syntax, `sslmode=require&sslaccept=strict&sslcert=<file>`, because its engine ignores `sslmode=verify-full`, accepts any certificate without `sslaccept=strict`, and reads only one certificate from the file. With a CA file set, a URL that carries `ssl*` parameters is refused (node-postgres would let them replace the CA), and Prisma refuses a file with more than one certificate. On EC2, `infra/select-db-ca.sh` picks the single CA from the RDS regional bundle that verifies the endpoint. Migrations are a single PostgreSQL baseline; `prisma migrate deploy` takes an advisory lock, so instances booting together apply it once.
 
 `STORAGE_MODE` only selects where covers live: `local` (default outside production) or `s3` (default in production). Local covers default to `data/covers/`, and `LOCAL_COVERS_DIR` overrides the directory. Cover files use UUID names and `.jpg`, `.png` or `.webp` extensions. Local mode does not instantiate S3 or require AWS credentials. S3 defaults to `infs3701-game-library-images` in `us-east-1`; `S3_BUCKET` and `AWS_REGION` can override them. The SDK uses its credential chain; EC2 configuration calls for an instance role.
 
@@ -49,13 +55,13 @@ React holds a fetched copy plus UI state. Create/edit use server responses, dele
 
 ## Server credentials
 
-`server-secrets.ts` lazily reads JSON `SecretString` values from Secrets Manager in `us-east-1`: `infs3701/game-library/igdb` supplies `IGDB_CLIENT_ID` and `IGDB_CLIENT_SECRET`; `infs3701/game-library/steam` supplies `STEAM_WEB_API_KEY`. Region is fixed for these secrets, independent of S3's `AWS_REGION`. AWS SDK v3 uses its default credential chain, including the EC2 instance role; no static AWS keys are configured by the app.
+`server-secrets.ts` lazily reads JSON `SecretString` values from Secrets Manager in `us-east-1`. The IGDB secret supplies `IGDB_CLIENT_ID` and `IGDB_CLIENT_SECRET`; the Steam secret supplies `STEAM_WEB_API_KEY`. Their IDs come from `IGDB_SECRET_ID` and `STEAM_SECRET_ID` (the group stack passes generated ARNs), defaulting to `infs3701/game-library/igdb` and `infs3701/game-library/steam`. Region is fixed for these secrets, independent of S3's `AWS_REGION`. AWS SDK v3 uses its default credential chain, including the EC2 instance role; no static AWS keys are configured by the app.
 
-`SECRETS_SOURCE=aws` selects Secrets Manager; `SECRETS_SOURCE=env` selects server environment variables loaded by Next.js from `.env`/`.env.local`. The default is `aws` in production and `env` otherwise. `.env.example` explicitly selects `env` for local production-build testing; the EC2 PM2 config explicitly selects `aws`. AWS mode ignores provider credentials in the environment, including on failure. Invalid source values fail closed.
+`SECRETS_SOURCE=aws` selects Secrets Manager; `SECRETS_SOURCE=env` selects server environment variables loaded by Next.js from `.env`/`.env.local`. The default is `aws` in production and `env` otherwise. `.env.example` explicitly selects `env` for local production-build testing; the env file written by `infra/bootstrap.sh` explicitly selects `aws`. AWS mode ignores provider credentials in the environment, including on failure. Invalid source values fail closed.
 
 The process-wide loader shares successful values across route bundles for five minutes per secret and coalesces concurrent reads. Expiry triggers a fresh read on next use; failures are not cached and expired values are not served. JSON must contain every required nonblank string. Secrets Manager requests use an eight-second abort deadline and at most two SDK attempts. No retrieval occurs during module initialization/build, and secrets are never written to disk or `process.env`. Provider clients map lookup failures to safe 503 errors. IGDB's token cache also compares credentials, so refreshed credentials trigger a new token. Each application process has its own cache; restart clears it.
 
-See the [deployment runbook](../deploy/README.md#6-provider-secrets) for IAM permissions and live validation. Local tests use synthetic secrets; EC2 role access remains unverified by this change.
+For the group deployment, IAM is described in [GROUP_ARCHITECTURE.md](GROUP_ARCHITECTURE.md) (D10, D14). The individual-assignment [runbook](../deploy/individual/README.md#6-provider-secrets) covers the earlier fixed-name setup. Local tests use synthetic secrets.
 
 ## Phase 9 IGDB autofill (implemented)
 
@@ -100,10 +106,18 @@ Provider references: [IGDB API](https://api-docs.igdb.com/), [Steam owned games]
 
 The header uses a Radix dropdown and the shared Dialog components for export confirmation. Only confirming Export JSON (or Retry export within that dialog) starts the request. Export fetches the attachment, downloads a Blob using the server filename, and revokes its object URL. It does not use the filtered or cached browser game list. Duplicate export clicks are blocked while pending; failures keep the confirmation open with Retry export without clearing the library. Dismissal is blocked during the request; otherwise Cancel, Close and Escape cancel without fetching. Steam opens the existing workflow and restores focus to the menu trigger on close. No schema migration or AWS permission change is needed.
 
-## Deployment status
+## Group runtime on EC2
 
-Phase 7 deployment is owner-confirmed on Amazon Linux 2023 at `/home/ec2-user/infs3701-game-library`. The documented environment uses Nginx on port 80 and PM2 with one Next.js process on `127.0.0.1:3000`.
+The group deployment ([GROUP_ARCHITECTURE.md](GROUP_ARCHITECTURE.md)) runs 2–4 identical Amazon Linux 2023 instances behind an ALB. Each builds the app from source at boot; nothing is stored on the instance.
 
-Phase 8 cloud deployment and validation are complete, owner-confirmed on 2026-10-02. That single-instance SQLite/EBS deployment ([runbook](../deploy/README.md), PM2, EBS mount, IAM and cleanup configurations) is kept as the individual-assignment reference and no longer matches the code. The group deployment is described in [GROUP_ARCHITECTURE.md](GROUP_ARCHITECTURE.md).
+- **User data** (CloudFormation, S3 session) writes `/etc/game-library/stack.env` with non-secret stack values, clones the repo to `/opt/game-library` at the pinned `GitCommit`, and runs `infra/bootstrap.sh`. The keys are listed at the top of that script.
+- **`infra/bootstrap.sh`** reads the instance ID and AZ from IMDSv2, installs Node.js 24, Nginx and `aws-cfn-bootstrap`, adds 2 GiB of swap for the build, and creates the `game-library` system user. It downloads the RDS regional CA bundle and selects the endpoint's CA, then writes `/etc/game-library/app.env` (non-secret settings only). As that user it runs `npm ci`, `npm run build` and the migrations through the DB wrapper. It installs Nginx and the systemd units, waits for `/api/health` through Nginx, and reports the result with `cfn-signal`. Any failure signals failure.
+- **Nginx** (`infra/nginx/game-library.conf`) listens on 80 as the default server and proxies to `127.0.0.1:3000`. It forwards the ALB's `X-Forwarded-Proto`, allows 6 MiB bodies, waits up to 180 s for the app, and adds `X-Served-By: <instance-id> <az>` to every response.
+- **systemd** (`infra/systemd/`): `game-library.service` runs `next start` through the DB wrapper and restarts it on failure. `game-library-cleanup.timer` runs the cover cleanup through the wrapper two minutes after boot and five minutes after each run.
+- **`GET /api/health`** returns 200 without touching the database, so an RDS failover can't take every target out of the ALB at once.
+- **Footer badge:** the page renders per request and shows `INSTANCE_ID` and `AVAILABILITY_ZONE` from the env file. It's hidden when they are unset (local development).
+- **Build ID:** `next.config.ts` sets `generateBuildId` to `GIT_COMMIT` (exported by the bootstrap), falling back to `git rev-parse HEAD`. Instances that build the same commit then serve the same `/_next/static` paths.
+
+The single-instance SQLite/EBS deployment of the individual assignment (Phases 7 and 8, owner-confirmed on 2026-10-02) is kept in [deploy/individual/](../deploy/individual/README.md) as a reference. It no longer matches the code.
 
 `npm ci` generates Prisma Client. `npm run dev` applies migrations first; `npm run build` generates the client and builds with webpack. `npm start` checks the storage configuration but does not apply migrations. Local production-build testing requires `STORAGE_MODE=local` and a running Docker PostgreSQL; `.env.example` sets the mode.

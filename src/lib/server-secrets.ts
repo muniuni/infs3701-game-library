@@ -5,13 +5,17 @@ import {
   SecretsManagerClient,
 } from "@aws-sdk/client-secrets-manager";
 
+// On AWS the stack passes generated secret ARNs through IGDB_SECRET_ID and
+// STEAM_SECRET_ID. The fixed names are the defaults for other setups.
 const definitions = {
   igdb: {
-    id: "infs3701/game-library/igdb",
+    idVariable: "IGDB_SECRET_ID",
+    defaultId: "infs3701/game-library/igdb",
     keys: ["IGDB_CLIENT_ID", "IGDB_CLIENT_SECRET"],
   },
   steam: {
-    id: "infs3701/game-library/steam",
+    idVariable: "STEAM_SECRET_ID",
+    defaultId: "infs3701/game-library/steam",
     keys: ["STEAM_WEB_API_KEY"],
   },
 } as const;
@@ -64,7 +68,9 @@ export function createSecretLoader(
     if (existing) return existing;
     const request = (async () => {
       try {
-        const raw = await read(definition.id);
+        const raw = await read(
+          env[definition.idVariable]?.trim() || definition.defaultId,
+        );
         const parsed: unknown = JSON.parse(raw ?? "");
         if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
           throw new Error();

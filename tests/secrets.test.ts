@@ -66,6 +66,40 @@ test("production secrets are lazy, deduplicated, cached independently and refres
   assert.equal(calls.length, 3);
 });
 
+test("secret IDs come from IGDB_SECRET_ID and STEAM_SECRET_ID when set", async () => {
+  const igdbArn =
+    "arn:aws:secretsmanager:us-east-1:123456789012:secret:IgdbSecret-AbCdEf";
+  const steamArn =
+    "arn:aws:secretsmanager:us-east-1:123456789012:secret:SteamSecret-GhIjKl";
+  const calls: string[] = [];
+  const secrets = createSecretLoader({
+    env: {
+      SECRETS_SOURCE: "aws",
+      IGDB_SECRET_ID: igdbArn,
+      STEAM_SECRET_ID: ` ${steamArn} `,
+    },
+    read: async (id) => {
+      calls.push(id);
+      return JSON.stringify(
+        id === igdbArn ? igdb : { STEAM_WEB_API_KEY: "aws-key" },
+      );
+    },
+  });
+  assert.equal((await secrets.igdb()).clientId, "test-id");
+  assert.equal(await secrets.steam(), "aws-key");
+  assert.deepEqual(calls, [igdbArn, steamArn]);
+  // Blank values fall back to the default names.
+  const fallback: string[] = [];
+  await createSecretLoader({
+    env: { SECRETS_SOURCE: "aws", STEAM_SECRET_ID: " " },
+    read: async (id) => {
+      fallback.push(id);
+      return '{"STEAM_WEB_API_KEY":"key"}';
+    },
+  }).steam();
+  assert.deepEqual(fallback, ["infs3701/game-library/steam"]);
+});
+
 test("invalid secrets and AWS failures are sanitized and retried, without env fallback", async () => {
   for (const invalid of [
     undefined,

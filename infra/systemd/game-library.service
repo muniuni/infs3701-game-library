@@ -1,0 +1,23 @@
+# Installed by infra/bootstrap.sh. Next.js on 127.0.0.1:3000 behind Nginx.
+[Unit]
+Description=Game Library (Next.js)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=game-library
+Group=game-library
+WorkingDirectory=/opt/game-library
+# Non-secret settings only. DATABASE_URL is built in memory by the wrapper.
+EnvironmentFile=/etc/game-library/app.env
+ExecStart=/usr/bin/node scripts/with-database-url.mjs /usr/bin/node node_modules/next/dist/bin/next start --hostname 127.0.0.1 --port 3000
+Restart=always
+RestartSec=5
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=full
+ProtectHome=yes
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,20 @@
+# Installed by infra/bootstrap.sh. Started by game-library-cleanup.timer.
+# Runs on every instance; concurrent runs are harmless (S3 deletes are
+# idempotent and the ledger delete is conditional).
+[Unit]
+Description=Retry Game Library cover cleanup
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=game-library
+Group=game-library
+WorkingDirectory=/opt/game-library
+EnvironmentFile=/etc/game-library/app.env
+ExecStart=/usr/bin/node scripts/with-database-url.mjs /usr/bin/npm run covers:cleanup
+TimeoutStartSec=15min
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=full
+ProtectHome=yes

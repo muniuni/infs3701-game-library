@@ -1754,6 +1754,21 @@ dd {
   color: var(--accent);
   flex-shrink: 0;
 }
+/* Operations badge (instance and AZ). Never intercepts clicks. */
+.served-by {
+  position: fixed;
+  bottom: 8px;
+  left: 8px;
+  z-index: 10;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--surface) 85%, transparent);
+  color: var(--text-faint);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
 .game-card {
   position: relative;
 }

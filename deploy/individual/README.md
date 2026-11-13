@@ -1,5 +1,7 @@
 # Phase 8 deployment runbook
 
+> **Individual-assignment reference only.** This single-instance SQLite/EBS/PM2 runbook no longer matches the code (the app now uses PostgreSQL). The files in this folder, including `ecosystem.config.cjs` (moved here from the repo root), are kept for the record. The group deployment is in [docs/GROUP_ARCHITECTURE.md](../../docs/GROUP_ARCHITECTURE.md) and [infra/](../../infra/).
+
 Phase 8 cloud deployment and validation are complete, owner-confirmed on 2026-10-02. The procedures below are retained for maintenance, redeployment and repeat validation. Keep the current PM2 process name if it differs from `game-library`, and avoid running two app processes.
 
 ## 1. Mount the attached data volume

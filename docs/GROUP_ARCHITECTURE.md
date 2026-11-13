@@ -345,7 +345,8 @@ Rough order of magnitude: **~$170/month**, with the NAT gateways the largest sha
 | Secrets after a Reset | Second rebuild succeeds | Generated names already avoid clashes (D10) |
 | Node.js version on AL2023 | `dnf list nodejs*` | Install via `nvm` |
 | Pages work across instances (consistent build ID, D4) | Load one page's HTML, then fetch every `/_next/static/...` URL it references many times through the ALB. None may return 404 | Fix `generateBuildId`; check that both instances built the same SHA |
-| DB TLS settings accepted by both Prisma Migrate and the `pg` adapter | `prisma migrate deploy` and the app both connect with RDS `force_ssl=1` | The wrapper builds a separate migrate URL in Prisma's TLS syntax (`sslmode=require&sslcert=<ca>&sslaccept=strict`) and passes `ssl: { ca, rejectUnauthorized: true }` to the adapter in code. Test this locally first against a TLS-enabled Docker Postgres in S2, so the first test isn't in a paid session |
+| DB TLS settings accepted by both Prisma Migrate and the `pg` adapter | `prisma migrate deploy` and the app both connect with RDS `force_ssl=1` | The wrapper builds a separate migrate URL in Prisma's TLS syntax (`sslmode=require&sslcert=<ca>&sslaccept=strict`) and passes `ssl: { ca, rejectUnauthorized: true }` to the adapter in code. Test this locally first against a TLS-enabled Docker Postgres in S2, so the first test isn't in a paid session. **S2 result (14 Nov, TLS-only Docker Postgres 18, self-signed CA):** the fallback is required. Prisma's engine treats `sslmode=verify-full` as no verification (it connected with a decoy CA), accepts any certificate unless `sslaccept=strict` is set, and can't read a multi-certificate bundle. A URL `sslmode` in node-postgres replaces the `ssl` object passed in code. Implemented: no TLS parameters in `DATABASE_URL`; TLS from `DATABASE_CA_FILE` (pg in code, Prisma in its own syntax); `infra/select-db-ca.sh` picks the single CA that verifies the endpoint. Migrate and app both pass with the right CA and fail with a decoy CA or a host-name mismatch |
+| The RDS regional bundle contains a CA that verifies the endpoint on its own (the server sends its intermediate) | `infra/select-db-ca.sh` succeeds in `cloud-init-output.log`; `SELECT ssl FROM pg_stat_ssl` is true | Pin `CACertificateIdentifier` and fetch that CA's intermediate as well; or append intermediates to the selected file |
 
 ## 7. Evidence plan (doc appendix and video)
 
@@ -411,23 +412,26 @@ Each session is a separate Claude Code session that starts by reading this docum
 - [x] Rename `src/lib/sqlite-game-repository.ts` → `prisma-game-repository.ts` and update imports. Check that the unique-constraint error mapping (P2002) still reports title/IGDB/Steam conflicts. Also fixed the concurrent-import misreport (D8).
 - [x] Adapt `tests/sqlite.test.ts` (now `tests/prisma-repository.test.ts`) and any test that opened a SQLite file to the local Postgres. Each unit test gets its own migrated database (`scripts/test-database.mjs`). Update `.env.example`, `README.md` and `docs/ARCHITECTURE.md` (storage sections).
 - **Done when:** `npm run lint`, `npm run typecheck`, `npm test` and `npm run test:e2e` all pass against Docker Postgres. **Done 14 Nov:** lint and typecheck clean, 38/38 unit tests, 27/27 e2e tests.
-- Left for S2: `ecosystem.config.cjs` and `deploy/` still describe the SQLite/EBS/PM2 deployment.
+- Left for S2: `ecosystem.config.cjs` and `deploy/` still describe the SQLite/EBS/PM2 deployment. (Moved to `deploy/individual/` in S2.)
 
 ### S2. Runtime glue for AWS (no AWS)
 
-- [ ] `scripts/with-database-url.mjs`:
+- [x] `scripts/with-database-url.mjs`:
   - Reads the RDS-managed secret (ARN from env) with the AWS SDK.
   - Builds `DATABASE_URL` in memory (URL-encoded password, `sslmode=verify-full`, CA bundle path).
   - Runs the given command. Locally it passes `DATABASE_URL` through unchanged.
-- [ ] Make the Prisma `pg` adapter use the CA bundle for TLS (`ssl: { ca, rejectUnauthorized: true }` in code). Give `prisma migrate deploy` its own URL in Prisma's TLS syntax if it rejects `sslmode=verify-full`. Test both against a TLS-enabled Docker Postgres (self-signed CA) before any AWS session.
-- [ ] `next.config.ts`: `generateBuildId` returns the commit SHA (from an env var set by `bootstrap.sh`, falling back to `git rev-parse HEAD`).
-- [ ] `src/lib/server-secrets.ts`: secret IDs from `IGDB_SECRET_ID` / `STEAM_SECRET_ID`, with the current names as defaults. Update `tests/secrets.test.ts`.
-- [ ] `GET /api/health`: a shallow 200 response with no DB access.
-- [ ] Footer badge showing the instance ID and AZ from env vars, hidden when unset (local dev).
-- [ ] `infra/bootstrap.sh`: install packages, build, migrate via the wrapper, and write the env file and systemd units. Set up Nginx with `X-Forwarded-Proto` passthrough and the `X-Served-By` header. Download the RDS CA bundle. Run `cfn-signal`.
-- [ ] systemd units: `game-library.service` and the cleanup service and timer, replacing the PM2/EBS-specific `deploy/` files. Keep the old `deploy/` folder as the individual-assignment reference, or move it to `deploy/individual/`.
-- [ ] Update `docs/ARCHITECTURE.md` and `README.md` for the new runtime.
-- **Done when:** lint, typecheck and all tests pass. `bash -n infra/bootstrap.sh` and `shellcheck` are clean. The wrapper works locally against Docker Postgres.
+  - As built: the RDS-managed secret holds only `username` and `password`, so host, port and database come from `DB_HOST`, `DB_PORT` and `DB_NAME`. The URL carries no TLS parameters; TLS comes from `DATABASE_CA_FILE` (§6 TLS row).
+- [x] Make the Prisma `pg` adapter use the CA bundle for TLS (`ssl: { ca, rejectUnauthorized: true }` in code). Give `prisma migrate deploy` its own URL in Prisma's TLS syntax if it rejects `sslmode=verify-full`. Test both against a TLS-enabled Docker Postgres (self-signed CA) before any AWS session. Prisma silently skips verification with `verify-full`, so its own URL is built in `prisma.config.ts` (§6).
+- [x] `next.config.ts`: `generateBuildId` returns the commit SHA (from an env var set by `bootstrap.sh`, falling back to `git rev-parse HEAD`). The env var is `GIT_COMMIT`.
+- [x] `src/lib/server-secrets.ts`: secret IDs from `IGDB_SECRET_ID` / `STEAM_SECRET_ID`, with the current names as defaults. Update `tests/secrets.test.ts`.
+- [x] `GET /api/health`: a shallow 200 response with no DB access.
+- [x] Footer badge showing the instance ID and AZ from env vars, hidden when unset (local dev). The env vars are `INSTANCE_ID` and `AVAILABILITY_ZONE`; `/` renders per request.
+- [x] `infra/bootstrap.sh`: install packages, build, migrate via the wrapper, and write the env file and systemd units. Set up Nginx with `X-Forwarded-Proto` passthrough and the `X-Served-By` header. Download the RDS CA bundle. Run `cfn-signal`.
+  - Contract for the S3 user data: write `/etc/game-library/stack.env` (keys listed at the top of `bootstrap.sh`, including `DB_NAME`, so the template must set `DBName`), clone to `/opt/game-library` at `GitCommit`, then run the script. The script reads the instance ID and AZ from IMDSv2 itself and writes `/etc/game-library/app.env`.
+  - It also adds 2 GiB of swap so `next build` can't be killed for memory on a t3.small.
+- [x] systemd units: `game-library.service` and the cleanup service and timer, replacing the PM2/EBS-specific `deploy/` files. Keep the old `deploy/` folder as the individual-assignment reference, or move it to `deploy/individual/`. Moved to `deploy/individual/`, with `ecosystem.config.cjs`; new units in `infra/systemd/`, Nginx config in `infra/nginx/`.
+- [x] Update `docs/ARCHITECTURE.md` and `README.md` for the new runtime.
+- **Done when:** lint, typecheck and all tests pass. `bash -n infra/bootstrap.sh` and `shellcheck` are clean. The wrapper works locally against Docker Postgres. **Done 14 Nov:** lint and typecheck clean, 45/45 unit tests, 27/27 e2e tests; `bash -n` and `shellcheck` clean. The wrapper was tested end to end against a TLS-only Docker Postgres through a stand-in Secrets Manager endpoint. In an `amazonlinux:2023` x86_64 container: package names, `nginx -t` and `systemd-analyze verify` pass, and `npm ci` plus `npm run build` succeed as the app user with the build ID from `GIT_COMMIT`. Not testable without AWS: IMDSv2, `cfn-signal`, the RDS CA bundle and the full boot.
 
 ### S3. CloudFormation stack and first deploy (AWS)
 

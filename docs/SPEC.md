@@ -55,7 +55,7 @@ Uploads are sent with the game save and displayed through `/api/covers/:id`. Unr
 
 Retired objects are deleted immediately when possible. Failed deletions remain in SQLite for `npm run covers:cleanup`; that command also processes pending uploads older than 24 hours. Local mode has no automatic cleanup schedule. Production cleanup uses the supplied service/timer. Bucket privacy does not restrict the unauthenticated application image API.
 
-Phase 8 completion was confirmed by the owner on 2026-10-02. See the [deployment runbook](../deploy/README.md) for setup and validation procedures. EBS snapshots do not contain S3 image data.
+Phase 8 completion was confirmed by the owner on 2026-10-02. See the [deployment runbook](../deploy/individual/README.md) for setup and validation procedures. EBS snapshots do not contain S3 image data.
 
 ## Phase 9 IGDB autofill (implemented)
 
