@@ -1,5 +1,9 @@
 # Implementation status and remaining plan
 
+> **Archived individual-assignment document. It was not updated for the group deployment.**
+> - It records the phases, the test results and the SQLite/EBS/PM2 deployment of the individual assignment, up to October 2026.
+> - None of it describes the current status. The app now runs on PostgreSQL, and the group's plan and progress are tracked in [GROUP_ARCHITECTURE.md §9](../GROUP_ARCHITECTURE.md#9-implementation-sessions).
+
 ## Status
 
 | Phase                     | Status                                                                                                   |
@@ -18,7 +22,7 @@ The active repository uses Prisma/SQLite; new databases start empty and survive 
 - Local SQLite at `data/game-library.sqlite` and uploaded covers at `data/covers/`, without AWS. EBS mode requires `/mnt/game-library-data/game-library.sqlite` and its separate mounted filesystem/UUID; covers use private S3 through IAM.
 - Multipart saves, validated JPEG/PNG/WebP images up to 5 MiB and 40 megapixels, application image delivery, preview and failed-save retry.
 - Transactional cover references and a durable cleanup ledger. Mutations attempt retired-object deletion; `npm run covers:cleanup` retries failed deletes and pending uploads older than 24 hours.
-- PM2 configuration, mount dependency, IAM policies, cleanup service/timer and [deployment guide](../deploy/individual/README.md). Cloud deployment and validation are owner-confirmed complete. Local mode has no automatic cleanup timer.
+- PM2 configuration, mount dependency, IAM policies, cleanup service/timer and [deployment guide](../../deploy/individual/README.md). Cloud deployment and validation are owner-confirmed complete. Local mode has no automatic cleanup timer.
 
 No migration of previous in-memory records is required. EBS snapshot instructions cover the database, not historical S3 image contents.
 
@@ -30,7 +34,7 @@ Run `npm test`, `npm run lint`, `npm run typecheck`, `npm run build`, then `PLAY
 
 ## Phase 8 completion
 
-Cloud deployment and validation were confirmed complete by the owner on 2026-10-02. The [deployment runbook](../deploy/individual/README.md) remains the reference for maintenance and repeat validation. This documentation update did not rerun cloud checks.
+Cloud deployment and validation were confirmed complete by the owner on 2026-10-02. The [deployment runbook](../../deploy/individual/README.md) remains the reference for maintenance and repeat validation. This documentation update did not rerun cloud checks.
 
 ## Phase 9 IGDB delivered
 
@@ -64,7 +68,7 @@ Steam import compatibility fix: operation IDs now support HTTP deployments witho
 
 ## Secrets Manager integration
 
-Implemented lazy role-based retrieval of both provider secrets in `us-east-1`, a shared five-minute memory cache, concurrent-read deduplication, validated JSON and safe 503 failures. Local environment support is retained with explicit source selection for local production tests. The EC2 PM2 configuration selects AWS; an IAM policy template and [deployment instructions](../deploy/individual/README.md#6-provider-secrets) are included. No database migration is required for this integration.
+Implemented lazy role-based retrieval of both provider secrets in `us-east-1`, a shared five-minute memory cache, concurrent-read deduplication, validated JSON and safe 503 failures. Local environment support is retained with explicit source selection for local production tests. The EC2 PM2 configuration selects AWS; an IAM policy template and [deployment instructions](../../deploy/individual/README.md#6-provider-secrets) are included. No database migration is required for this integration.
 
 On 2026-10-10, validation passed 34 unit/integration tests, 23 Chromium E2E tests, lint, typecheck, production build and `git diff --check`. Credential tests cover local source selection, production precedence, secret names, caching/expiry, concurrent reads, malformed/missing values, retry after failure, provider error sanitization and IGDB token renewal after secret rotation. Live EC2 role access, Secrets Manager reads and real-provider behavior remain pending.
 

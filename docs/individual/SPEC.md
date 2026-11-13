@@ -1,5 +1,15 @@
 # Product specification
 
+> **Archived individual-assignment document. It was not updated for the group deployment.**
+> - **Still describes the app:** the data model, library behaviour, Phase 9 IGDB autofill, Phase 9 Steam import and JSON library export.
+> - **Out of date:**
+>   - the status paragraph;
+>   - the storage-mode table and paths (the `ebs` mode and SQLite files are gone; the app now uses PostgreSQL with `STORAGE_MODE=local | s3`);
+>   - the Phase 8 deployment notes;
+>   - the fixed Secrets Manager names (the group stack passes generated secret ARNs).
+>
+> For the current runtime, see [ARCHITECTURE.md](../ARCHITECTURE.md) and [GROUP_ARCHITECTURE.md](../GROUP_ARCHITECTURE.md).
+
 ## Status and scope
 
 Single-user game library with no authentication. Prisma/SQLite persistence and local/S3 cover storage are implemented. Phase 7 EC2 deployment and Phase 8 cloud deployment/validation are complete, owner-confirmed. Phase 9 IGDB autofill is implemented and locally validated; live-provider/deployment validation remains pending. Steam library import is implemented; live Steam/IGDB import validation remains pending. Assignment extensions are not implemented.
@@ -55,7 +65,7 @@ Uploads are sent with the game save and displayed through `/api/covers/:id`. Unr
 
 Retired objects are deleted immediately when possible. Failed deletions remain in SQLite for `npm run covers:cleanup`; that command also processes pending uploads older than 24 hours. Local mode has no automatic cleanup schedule. Production cleanup uses the supplied service/timer. Bucket privacy does not restrict the unauthenticated application image API.
 
-Phase 8 completion was confirmed by the owner on 2026-10-02. See the [deployment runbook](../deploy/individual/README.md) for setup and validation procedures. EBS snapshots do not contain S3 image data.
+Phase 8 completion was confirmed by the owner on 2026-10-02. See the [deployment runbook](../../deploy/individual/README.md) for setup and validation procedures. EBS snapshots do not contain S3 image data.
 
 ## Phase 9 IGDB autofill (implemented)
 
@@ -99,7 +109,7 @@ Cancel, outside click, Escape and Close prompt Review import / Discard / Keep ed
 
 IGDB and Steam credentials remain server-only. Production defaults to AWS Secrets Manager in `us-east-1`, using `infs3701/game-library/igdb` and `infs3701/game-library/steam` through the EC2 role. Successful reads are cached in process memory for five minutes and refreshed on demand. Failed or invalid reads return a safe service-unavailable response; manual game entry remains available.
 
-Local development retains `.env`/`.env.local` support. Set `SECRETS_SOURCE=env` for local production-build testing; set `SECRETS_SOURCE=aws` for EC2. AWS mode never falls back to environment credentials. No credential values are sent to the browser or persisted with games. See [Architecture](ARCHITECTURE.md#server-credentials) for configuration details.
+Local development retains `.env`/`.env.local` support. Set `SECRETS_SOURCE=env` for local production-build testing; set `SECRETS_SOURCE=aws` for EC2. AWS mode never falls back to environment credentials. No credential values are sent to the browser or persisted with games. See [Architecture](../ARCHITECTURE.md#server-credentials) for configuration details.
 
 ## JSON library export
 

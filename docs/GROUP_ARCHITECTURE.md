@@ -8,13 +8,13 @@ Sources:
 
 - INFS3701 Group Assignment brief and marking scheme (Moodle, Assessments Hub)
 - Course announcements up to 12 Nov 2026 and the Course Q&A forum (lecturer replies quoted as "Q&A" below)
-- Wataru Takeda's individual assignment design document (the starting point)
+- The repository owner's individual assignment design document (the starting point)
 - The group-approved architecture diagram (kept outside this repo)
 - This repository at commit `bb49a9a`
 
 ## 1. Scope in one paragraph
 
-We take **Option A**: scale up Wataru's individual service, Game Library, a Next.js app for tracking a personal game collection with IGDB autofill, Steam library import, cover uploads and JSON export. The individual version ran on one EC2 instance with SQLite on EBS. The group version runs **2–4 EC2 instances in an Auto Scaling group across two Availability Zones**, behind an **HTTPS Application Load Balancer**, with a **Multi-AZ RDS for PostgreSQL** data tier, covers in **S3**, credentials in **Secrets Manager**, and a **CloudWatch dashboard and alarm**. Everything is deployed by **one CloudFormation stack** and rebuilt from scratch every work session, because the Learner Lab is reset at the end of each session. **Auto Scaling is our only Going Further item.**
+We take **Option A**: scale up the repository owner's individual service, Game Library, a Next.js app for tracking a personal game collection with IGDB autofill, Steam library import, cover uploads and JSON export. The individual version ran on one EC2 instance with SQLite on EBS. The group version runs **2–4 EC2 instances in an Auto Scaling group across two Availability Zones**, behind an **HTTPS Application Load Balancer**, with a **Multi-AZ RDS for PostgreSQL** data tier, covers in **S3**, credentials in **Secrets Manager**, and a **CloudWatch dashboard and alarm**. Everything is deployed by **one CloudFormation stack** and rebuilt from scratch every work session, because the Learner Lab is reset at the end of each session. **Auto Scaling is our only Going Further item.**
 
 ## 2. Requirements and how we meet them
 
@@ -108,7 +108,7 @@ Each decision lists what we chose, why, and what we gave up. The numbered user a
   - **Nginx kept** (it's in the approved diagram). It listens on 80, proxies to `127.0.0.1:3000`, and forwards the ALB's `X-Forwarded-Proto` (`$http_x_forwarded_proto`, not `$scheme`). It also sets `client_max_body_size 6m` and `proxy_read_timeout 180s`, and adds `X-Served-By: <instance-id> <az>` to every response.
   - **Redeploying** new code means pushing to `main` and re-running `deploy.sh`. The new SHA triggers the rolling update.
   - **Consistent build ID across instances:** `next.config.ts` sets `generateBuildId` to the commit SHA (`git rev-parse HEAD`, exported by `bootstrap.sh`). Without this, every instance's independent `next build` gets a random build ID. Pages from one instance would then request `/_next/static/...` assets that another instance doesn't have, causing 404s and failed client navigations once the ALB alternates requests. The repo has no server actions (`"use server"`), so no shared `NEXT_SERVER_ACTIONS_ENCRYPTION_KEY` is needed. Add one as a stack-generated secret if server actions are ever introduced.
-- **Why:** with no AMI and a full rebuild every session, building from source at boot is the only way to get the app onto instances. Keeping the bootstrap logic in the repo keeps the template small and lets the script be versioned and reviewed like code. systemd is already on the AMI and handles restarts and boot ordering without PM2's `startup`/`save` steps. Deploying the latest `main` suits a repo where Wataru is the only person pushing, and pinning its SHA at deploy time keeps the whole fleet on one build.
+- **Why:** with no AMI and a full rebuild every session, building from source at boot is the only way to get the app onto instances. Keeping the bootstrap logic in the repo keeps the template small and lets the script be versioned and reviewed like code. systemd is already on the AMI and handles restarts and boot ordering without PM2's `startup`/`save` steps. Deploying the latest `main` suits a repo where the repository owner is the only person pushing, and pinning its SHA at deploy time keeps the whole fleet on one build.
 - **Trade-off:**
   - Each new instance takes several minutes from launch to healthy, because `npm ci` and the Next.js build run on a t3.small. This is the key constraint on scaling (D6).
   - Instances building different commits would break pages across the ALB even with a fixed build ID, because chunk hashes differ. Pinning the SHA prevents this; during a rolling update both commits briefly serve together, so avoid redeploying while recording evidence.
@@ -258,7 +258,7 @@ Revised 14 Nov after the S3 measurements: second policy on CPU, capacity defined
     - RDS: `CPUUtilization`, `DatabaseConnections`, `FreeStorageSpace`.
     - The dashboard's auto-refresh stays at 5 minutes or more.
   - **Alarm:** target group `HealthyHostCount < 2`, statistic Minimum, period 60 s, 2 of 2 datapoints, missing data treated as breaching. It sends both ALARM and OK notifications to an **SNS topic with an email subscription**.
-  - **Alert email:** Wataru's address, read from the gitignored `infra/deploy.env` and passed as a `NoEcho` parameter, so it never appears in the repo. The subscription has to be confirmed from the email after every rebuild.
+  - **Alert email:** the repository owner's address, read from the gitignored `infra/deploy.env` and passed as a `NoEcho` parameter, so it never appears in the repo. The subscription has to be confirmed from the email after every rebuild.
 - **Why:** fewer than two healthy targets means the service has lost its redundancy. That is the signal that matters for an HA design, and it fires naturally during the failover test. The ASG then replaces the instance and the alarm returns to OK, which shows detection and self-healing in one test.
 - **Trade-off:** a 5xx-rate alarm was considered and not chosen. One alarm on the HA signal is enough for the core, and 5xx and latency stay visible on the dashboard. (Target tracking creates and manages its own two alarms as well.)
 
@@ -293,7 +293,7 @@ Revised 14 Nov after the S3 measurements: second policy on CPU, capacity defined
     - `infra/bootstrap.sh`.
     - `infra/deploy.env.example`.
     - `infra/deploy.env` (gitignored; add it to `.gitignore` in S3).
-  - **Where it runs:** from Wataru's Mac, using the temporary credentials from the Learner Lab's "AWS Details" panel, pasted in each session. It also works from any group member's Mac with their own Lab credentials, in case credits run low.
+  - **Where it runs:** from the repository owner's Mac, using the temporary credentials from the Learner Lab's "AWS Details" panel, pasted in each session. It also works from any group member's Mac with their own Lab credentials, in case credits run low.
   - **What `deploy.sh` does:**
     1. Check that the credentials work (`aws sts get-caller-identity`), and resolve `main` to its current SHA for the `GitCommit` parameter (D4).
     2. Generate and import the certificate.
@@ -315,14 +315,14 @@ Revised 14 Nov after the S3 measurements: second policy on CPU, capacity defined
 
 | # | Question | Answer |
 | --- | --- | --- |
-| 1 | Which commit do instances build? | **Latest `main`, pinned to its SHA at deploy time.** First answered "track `main`" (Wataru is the only one pushing); changed to pinning after finding that mixed commits break page loads across instances. `deploy.sh` resolves the SHA and passes it as `GitCommit` (D4). The repo is public, so no deploy token is needed. |
+| 1 | Which commit do instances build? | **Latest `main`, pinned to its SHA at deploy time.** First answered "track `main`" (the repository owner is the only one pushing); changed to pinning after finding that mixed commits break page loads across instances. `deploy.sh` resolves the SHA and passes it as `GitCommit` (D4). The repo is public, so no deploy token is needed. |
 | 2 | API keys after each reset | **`deploy.sh` reads a gitignored file and passes NoEcho parameters; the stack creates the secrets** (D10) |
-| 3 | Where to deploy from | **Wataru's Mac with Learner Lab credentials. The template is YAML.** (D15) |
+| 3 | Where to deploy from | **The repository owner's Mac with Learner Lab credentials. The template is YAML.** (D15) |
 | 4 | Scaling policy | **Target tracking on requests per target. Measure one t3.small's capacity in the first AWS session and set the target at about half, because new instances take minutes to build and scaling must start early** (D6) |
 | 5 | Steam import | **Keep it and restore the routes.** Git suggests an accidental deletion (D16) |
 | 6 | Demo data | **Start empty, add games live** (D16) |
 | 7 | Show which instance served | **Footer badge plus `X-Served-By` header** (D13) |
-| 8 | Alarm | **`HealthyHostCount < 2` → SNS email to Wataru. The address comes from the same gitignored file as the keys and is passed as a parameter** (D12) |
+| 8 | Alarm | **`HealthyHostCount < 2` → SNS email to the repository owner. The address comes from the same gitignored file as the keys and is passed as a parameter** (D12) |
 | 9 | Access and framing | **Single user, open ALB, documented. Scaling justified by import/enrichment/image bursts, HA by irreplaceable personal records** (D1) |
 | 10 | S3 gateway endpoint | **Yes. Restrict to the endpoint for LabRole only, so the console still works** (D2, D9) |
 
@@ -366,9 +366,9 @@ Rough order of magnitude: **~$170/month**, with the NAT gateways the largest sha
 | `ManageMasterUserPassword` works under the Lab role | Stack creates the DB and the `rds!…` secret | Stack-generated secret (`AWS::SecretsManager::Secret` with `GenerateSecretString`) used through a dynamic reference **S3 (14 Nov): works.** The DB was created with an `rds!…` secret (status `active`), and both instances read it through the wrapper. |
 | SSM Session Manager works with LabInstanceProfile | Start a session to an instance | EC2 console system log; temporarily log bootstrap output to CloudWatch Logs **S3: works.** Both instances are `Online` in Systems Manager (agent 3.3.5828.0), and Run Command executed on both. Interactive `start-session` also needs the Session Manager plugin on the Mac. |
 | `cfn-signal` is available and allowed on AL2023 | `dnf install aws-cfn-bootstrap`; stack reaches `CREATE_COMPLETE` | Drop the CreationPolicy and rely on target health **S3: works.** CloudFormation received SUCCESS signals from both instances (and FAILURE signals from the first, failed boot), so the CreationPolicy is kept. |
-| Boot-to-healthy time | Timestamps in `cloud-init-output.log` and target health | Tune grace/warmup; if far too slow, consider building once and sharing the build output via S3 (needs a group decision) **S3 (14 Nov): ≈ 3.1–3.5 min (187–207 s)**, measured by Wataru (details in the S3 checklist). Fast enough: no shared build needed. |
+| Boot-to-healthy time | Timestamps in `cloud-init-output.log` and target health | Tune grace/warmup; if far too slow, consider building once and sharing the build output via S3 (needs a group decision) **S3 (14 Nov): ≈ 3.1–3.5 min (187–207 s)**, measured by the repository owner (details in the S3 checklist). Fast enough: no shared build needed. |
 | Prisma advisory lock with 2 instances migrating together | Both instances boot cleanly; `_prisma_migrations` has one row per migration | Only the first instance migrates (e.g. a lock row), or migrate from `deploy.sh` **S3: one row** in `_prisma_migrations` (`20261114000000_postgres_baseline`, not rolled back). The 1b instance applied it; the 1a instance found nothing pending ~3 s later. The boots were close but not exactly concurrent, so the lock itself wasn't exercised. Rolling updates add no new migrations, so this is accepted. |
-| Single t3.small capacity | Load test (D6) | — (this sets the scaling target) **S3:** measured by Wataru with `infra/load/capacity.js`. |
+| Single t3.small capacity | Load test (D6) | — (this sets the scaling target) **S3:** measured by the repository owner with `infra/load/capacity.js`. |
 | RDS offers the PostgreSQL major version used locally (18) on `db.t3.micro` | `aws rds describe-orderable-db-instance-options --engine postgres --engine-version 18.4 --db-instance-class db.t3.micro` | Use the newest major that is offered, and change `compose.yaml` to match **S3: yes.** RDS created 18.3 on db.t3.micro, Multi-AZ (primary 1b, standby 1a). No change to `compose.yaml`. |
 | Template size within the 51,200-byte inline limit | `aws cloudformation validate-template` | Upload the template to an S3 bucket first **S3: yes.** 26.5 KB, deployed inline. |
 | Secrets after a Reset | Second rebuild succeeds | Generated names already avoid clashes (D10) **Not yet testable;** checked by the S4 rebuild after the Reset. |
@@ -429,7 +429,7 @@ The approved diagram stays as the base. Make these changes in the original file:
 
 Each session is a separate Claude Code session that starts by reading this document. Sessions S1 and S2 use no AWS credits.
 
-**Commits and pushes are done by Wataru, never by Claude.** Each session ends by telling Wataru what to commit and whether to push. A push is required whenever instances need the new code. They clone from GitHub, and `deploy.sh` pins whatever `main` points to (D4). So everything that runs on an instance (app code, `infra/bootstrap.sh`, systemd and Nginx files) must be pushed **before** running `deploy.sh`. The template, `deploy.sh` and `deploy.env` run from the local Mac and don't need a push to take effect.
+**Commits and pushes are done by the repository owner, never by Claude.** Each session ends by telling the repository owner what to commit and whether to push. A push is required whenever instances need the new code. They clone from GitHub, and `deploy.sh` pins whatever `main` points to (D4). So everything that runs on an instance (app code, `infra/bootstrap.sh`, systemd and Nginx files) must be pushed **before** running `deploy.sh`. The template, `deploy.sh` and `deploy.env` run from the local Mac and don't need a push to take effect.
 
 ### S1. Data tier port and Steam restore (no AWS)
 
@@ -479,7 +479,7 @@ Each session is a separate Claude Code session that starts by reading this docum
   - First deploy (14 Nov, commit `e0b8a16`): every resource except the ASG was created. Both instances signalled FAILURE 24 s into `bootstrap.sh`, because AL2023's `mkswap` (util-linux) has no `-q` option. The S2 container test never reached the swap step, because the `amazonlinux:2023` image ships without util-linux. Fixed by dropping `-q`, and the fix was checked in an AL2023 container with util-linux installed. Everything before that step worked on real instances: user data, the clone at the pinned commit, IMDSv2, and the `nodejs24` and Nginx packages.
 - [ ] Work through every row of §6 and record the results in this document. **Done 14 Nov** except the rows that depend on the measurements below and "Secrets after a Reset" (S4). Also confirmed: the HTTP listener returns 301 to HTTPS, and the ALB negotiates TLS 1.3 with the self-signed `*.us-east-1.elb.amazonaws.com` certificate.
 - [x] Measure boot-to-healthy time and single-instance capacity (D6). Set the scaling target (≈ half capacity), grace period and warmup as parameter defaults, and record the numbers here.
-  - Boot-to-healthy (14 Nov deploy, both instances, Sydney time; measured by Wataru):
+  - Boot-to-healthy (14 Nov deploy, both instances, Sydney time; measured by the repository owner):
     - ASG activity start (t0) 02:03:32; instance launch time 02:03:31.
     - System log: `[bootstrap +127s] app healthy through Nginx` at 164.5 s since boot. Bootstrap itself took 127 s: packages 11 s, swap 16 s, `npm ci` 33 s, build 60 s, migrate 3 s. The remaining ~38 s before it is kernel boot, cloud-init and user data.
     - CloudFormation SUCCESS signals: 02:06:39 (t0 + 187 s).
@@ -496,8 +496,8 @@ Each session is a separate Claude Code session that starts by reading this docum
       - RDS CPU ≤ 9%; no 5xx errors.
     - So D6's saturation signals (p95 > ~1 s, errors, CPU > ~80%) were not reached. Per-instance capacity is **at least 50 req/s (3,000 req/min)**. The test didn't find the ceiling.
     - The 19% CPU at the top step is just under the t3.small CPU baseline (20%). Above that, a t3 in its default unlimited mode runs on surplus CPU credits, which are billed.
-    - Scaling target: **decided 14 Nov (Wataru)**. 1,500 req/min per instance on request count, plus a second policy at 20% average CPU. Defaults set in the template. Rationale and limitations are in D6.
-- [x] Smoke test: add a game, upload a cover, IGDB autofill, Steam import, export, and `X-Served-By` alternating. **Passed 14 Nov (Wataru, browser):** all of them, with the footer badge alternating between instances.
+    - Scaling target: **decided 14 Nov (the repository owner)**. 1,500 req/min per instance on request count, plus a second policy at 20% average CPU. Defaults set in the template. Rationale and limitations are in D6.
+- [x] Smoke test: add a game, upload a cover, IGDB autofill, Steam import, export, and `X-Served-By` alternating. **Passed 14 Nov (the repository owner, browser):** all of them, with the footer badge alternating between instances.
 - [ ] Record credits, then **Reset the Lab**.
 
 ### S4. Evidence run (AWS)
