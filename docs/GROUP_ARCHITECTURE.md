@@ -1,6 +1,6 @@
 # Group Architecture: Game Library on a Scalable, Highly Available AWS Stack
 
-Status: design locked 14 Nov 2026, not yet implemented. Due: Tuesday 17 Nov 2026, 4:00 pm (Sydney).
+Status: design locked 14 Nov 2026. S1 and S2 done; S3 files written, first AWS deploy pending. Due: Tuesday 17 Nov 2026, 4:00 pm (Sydney).
 
 This document records what the group decided for the INFS3701 group assignment, why, and how the work is split into implementation sessions. It is the reference for every implementation session. Change it here first if a decision changes.
 
@@ -435,9 +435,17 @@ Each session is a separate Claude Code session that starts by reading this docum
 
 ### S3. CloudFormation stack and first deploy (AWS)
 
-- [ ] `infra/game-library.yaml` (YAML): VPC, subnets, IGW, 2 NAT gateways, route tables, S3 gateway endpoint, SGs, S3 bucket and policy, IGDB/Steam secrets (NoEcho params), RDS parameter group, subnet group and Multi-AZ instance, ALB, listeners and target group, launch template (user data checks out the `GitCommit` parameter), ASG with CreationPolicy, `AutoScalingRollingUpdate` update policy and target tracking policy, SNS topic and subscription, alarm, dashboard. Outputs: HTTPS URL, bucket name, DB endpoint.
-- [ ] `infra/deploy.sh`, `infra/deploy.env.example`, and `infra/deploy.env` added to `.gitignore`.
-- [ ] Validate locally: `cfn-lint infra/game-library.yaml`, then `aws cloudformation validate-template`.
+- [x] `infra/game-library.yaml` (YAML): VPC, subnets, IGW, 2 NAT gateways, route tables, S3 gateway endpoint, SGs, S3 bucket and policy, IGDB/Steam secrets (NoEcho params), RDS parameter group, subnet group and Multi-AZ instance, ALB, listeners and target group, launch template (user data checks out the `GitCommit` parameter), ASG with CreationPolicy, `AutoScalingRollingUpdate` update policy and target tracking policy, SNS topic and subscription, alarm, dashboard. Outputs: HTTPS URL, bucket name, DB endpoint.
+  - As built (15 Nov, before any AWS run):
+    - `DBEngineVersion` (`18`) and `DBParameterGroupFamily` (`postgres18`) are parameters, so the §6 PostgreSQL-version fallback is a parameter change. Scaling target (300 req/min per instance), grace period and warmup (900 s) are parameters holding placeholders until measured.
+    - The ASG sets min and max but no `DesiredCapacity`. It starts at min (2), and a later update doesn't reset what target tracking has chosen.
+    - Rolling update: min 2 in service, batch 2, waits for `cfn-signal`, and suspends health-check replacement and scaling while it rolls. CloudFormation requires `MinInstancesInService` < `MaxSize`, so for the capacity measurement keep max at 4 and hold the group at 2 with `aws autoscaling suspend-processes --scaling-processes AlarmNotification` (resume afterwards), rather than deploying min = max = 2.
+    - The ASG waits for both NAT routes, the S3 endpoint, the bucket policy and the HTTPS listener, so instances boot with working outbound access. User data signals failure itself if the clone or checkout fails; after that, `bootstrap.sh` signals.
+    - Bucket policy matches LabRole with `aws:PrincipalArn`, which covers the instances' assumed-role sessions.
+    - The dashboard's auto-refresh interval is a console setting, not part of the template. Set it to 5 minutes or more when viewing.
+- [x] `infra/deploy.sh`, `infra/deploy.env.example`, and `infra/deploy.env` added to `.gitignore`.
+  - `deploy.sh` reuses an imported `*.us-east-1.elb.amazonaws.com` self-signed certificate if ACM still has one, otherwise generates and imports one. The name matches the ALB's DNS name, so the only browser warning is the untrusted issuer. Extra `Key=Value` arguments override template parameters (e.g. `TargetRequestsPerInstance=450`). Works with macOS's bash 3.2. Needs AWS CLI v2.
+- [ ] Validate locally: `cfn-lint infra/game-library.yaml`, then `aws cloudformation validate-template`. **cfn-lint 1.60.1 clean (15 Nov); template 26.5 KB, under the inline limit.** `shellcheck` clean on `deploy.sh` and the rendered user data. `validate-template` still to run with Lab credentials.
 - [ ] Record the Lab credit balance, then deploy with `--disable-rollback`. Confirm the SNS subscription email.
 - [ ] Work through every row of §6 and record the results in this document.
 - [ ] Measure boot-to-healthy time and single-instance capacity (D6). Set the scaling target (≈ half capacity), grace period and warmup as parameter defaults, and record the numbers here.

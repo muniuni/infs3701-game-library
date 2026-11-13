@@ -1,0 +1,716 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  Game Library on a scalable, highly available stack (INFS3701 group
+  assignment). See docs/GROUP_ARCHITECTURE.md. Deployed by infra/deploy.sh.
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label: { default: "Deployment (set by deploy.sh)" }
+        Parameters: [GitCommit, RepositoryUrl, CertificateArn]
+      - Label: { default: "Secrets and alerting (from infra/deploy.env)" }
+        Parameters: [IgdbClientId, IgdbClientSecret, SteamWebApiKey, AlertEmail]
+      - Label: { default: "Compute and scaling (D4, D6)" }
+        Parameters:
+          - InstanceType
+          - LatestAmiId
+          - MinSize
+          - MaxSize
+          - HealthCheckGracePeriod
+          - InstanceWarmup
+          - TargetRequestsPerInstance
+      - Label: { default: "Database (D7)" }
+        Parameters: [DBInstanceClass, DBEngineVersion, DBParameterGroupFamily, DBName]
+
+Parameters:
+  GitCommit:
+    Type: String
+    Description: Full commit SHA every instance checks out (D4). deploy.sh resolves main to it.
+    AllowedPattern: "^[0-9a-f]{40}$"
+  RepositoryUrl:
+    Type: String
+    Default: https://github.com/muniuni/infs3701-game-library.git
+  CertificateArn:
+    Type: String
+    Description: ARN of the self-signed certificate deploy.sh imported into ACM (D10).
+    AllowedPattern: "^arn:aws:acm:.+"
+  IgdbClientId:
+    Type: String
+    NoEcho: true
+    MinLength: 1
+  IgdbClientSecret:
+    Type: String
+    NoEcho: true
+    MinLength: 1
+  SteamWebApiKey:
+    Type: String
+    NoEcho: true
+    MinLength: 1
+  AlertEmail:
+    Type: String
+    NoEcho: true
+    Description: Receives the HealthyHostCount alarm (D12). Confirm the subscription after every rebuild.
+    AllowedPattern: "^[^@\\s]+@[^@\\s]+$"
+  InstanceType:
+    Type: String
+    Default: t3.small
+  LatestAmiId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
+  MinSize:
+    Type: Number
+    Default: 2
+    MinValue: 2
+  MaxSize:
+    Type: Number
+    Default: 4
+    MinValue: 2
+  HealthCheckGracePeriod:
+    Type: Number
+    Default: 900
+    Description: Seconds. Placeholder until boot-to-healthy time is measured (D6).
+  InstanceWarmup:
+    Type: Number
+    Default: 900
+    Description: Seconds. Placeholder until boot-to-healthy time is measured (D6).
+  TargetRequestsPerInstance:
+    Type: Number
+    Default: 300
+    MinValue: 1
+    Description: >-
+      Target tracking value for ALBRequestCountPerTarget (requests per minute).
+      Placeholder; set to about half of one t3.small's measured capacity (D6).
+  DBInstanceClass:
+    Type: String
+    Default: db.t3.micro
+  DBEngineVersion:
+    Type: String
+    Default: "18"
+    Description: PostgreSQL major version. Must match DBParameterGroupFamily and compose.yaml.
+  DBParameterGroupFamily:
+    Type: String
+    Default: postgres18
+  DBName:
+    Type: String
+    Default: gamelibrary
+    AllowedPattern: "^[a-z][a-z0-9_]{0,62}$"
+
+Resources:
+  # --- Network (D2) ------------------------------------------------------------
+  Vpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags: [{ Key: Name, Value: !Sub "${AWS::StackName}-vpc" }]
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags: [{ Key: Name, Value: !Sub "${AWS::StackName}-igw" }]
+
+  InternetGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref Vpc
+      InternetGatewayId: !Ref InternetGateway
+
+  PublicSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      CidrBlock: 10.0.1.0/24
+      AvailabilityZone: !Sub "${AWS::Region}a"
+      Tags: [{ Key: Name, Value: !Sub "${AWS::StackName}-public-a" }]
+
+  PublicSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      CidrBlock: 10.0.2.0/24
+      AvailabilityZone: !Sub "${AWS::Region}b"
+      Tags: [{ Key: Name, Value: !Sub "${AWS::StackName}-public-b" }]
+
+  AppSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      CidrBlock: 10.0.11.0/24
+      AvailabilityZone: !Sub "${AWS::Region}a"
+      Tags: [{ Key: Name, Value: !Sub "${AWS::StackName}-app-a" }]
+
+  AppSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      CidrBlock: 10.0.12.0/24
+      AvailabilityZone: !Sub "${AWS::Region}b"
+      Tags: [{ Key: Name, Value: !Sub "${AWS::StackName}-app-b" }]
+
+  DbSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      CidrBlock: 10.0.21.0/24
+      AvailabilityZone: !Sub "${AWS::Region}a"
+      Tags: [{ Key: Name, Value: !Sub "${AWS::StackName}-db-a" }]
+
+  DbSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      CidrBlock: 10.0.22.0/24
+      AvailabilityZone: !Sub "${AWS::Region}b"
+      Tags: [{ Key: Name, Value: !Sub "${AWS::StackName}-db-b" }]
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref Vpc
+      Tags: [{ Key: Name, Value: !Sub "${AWS::StackName}-public" }]
+
+  PublicDefaultRoute:
+    Type: AWS::EC2::Route
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PublicSubnetARouteTable:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnetA
+      RouteTableId: !Ref PublicRouteTable
+
+  PublicSubnetBRouteTable:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnetB
+      RouteTableId: !Ref PublicRouteTable
+
+  # One NAT gateway per AZ, so losing one AZ doesn't cut off the other.
+  NatEipA:
+    Type: AWS::EC2::EIP
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      Domain: vpc
+      Tags: [{ Key: Name, Value: !Sub "${AWS::StackName}-nat-a" }]
+
+  NatEipB:
+    Type: AWS::EC2::EIP
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      Domain: vpc
+      Tags: [{ Key: Name, Value: !Sub "${AWS::StackName}-nat-b" }]
+
+  NatGatewayA:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt NatEipA.AllocationId
+      SubnetId: !Ref PublicSubnetA
+      Tags: [{ Key: Name, Value: !Sub "${AWS::StackName}-nat-a" }]
+
+  NatGatewayB:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt NatEipB.AllocationId
+      SubnetId: !Ref PublicSubnetB
+      Tags: [{ Key: Name, Value: !Sub "${AWS::StackName}-nat-b" }]
+
+  AppRouteTableA:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref Vpc
+      Tags: [{ Key: Name, Value: !Sub "${AWS::StackName}-app-a" }]
+
+  AppRouteTableB:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref Vpc
+      Tags: [{ Key: Name, Value: !Sub "${AWS::StackName}-app-b" }]
+
+  AppDefaultRouteA:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref AppRouteTableA
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGatewayA
+
+  AppDefaultRouteB:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref AppRouteTableB
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGatewayB
+
+  AppSubnetARouteTable:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref AppSubnetA
+      RouteTableId: !Ref AppRouteTableA
+
+  AppSubnetBRouteTable:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref AppSubnetB
+      RouteTableId: !Ref AppRouteTableB
+
+  # The DB subnets get a route table with only the local route: no internet.
+  DbRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref Vpc
+      Tags: [{ Key: Name, Value: !Sub "${AWS::StackName}-db" }]
+
+  DbSubnetARouteTable:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref DbSubnetA
+      RouteTableId: !Ref DbRouteTable
+
+  DbSubnetBRouteTable:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref DbSubnetB
+      RouteTableId: !Ref DbRouteTable
+
+  # Full-access endpoint policy: AL2023 package repos are served from S3.
+  # The bucket policy does the restricting (D9).
+  S3GatewayEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcId: !Ref Vpc
+      VpcEndpointType: Gateway
+      ServiceName: !Sub "com.amazonaws.${AWS::Region}.s3"
+      RouteTableIds: [!Ref AppRouteTableA, !Ref AppRouteTableB]
+
+  # --- Security groups (D3): ALB -> app -> DB, no SSH -------------------------
+  # Cross-references live in standalone rules to avoid circular dependencies.
+  AlbSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: ALB - HTTPS and HTTP (redirect only) from the internet
+      VpcId: !Ref Vpc
+      SecurityGroupIngress:
+        - { IpProtocol: tcp, FromPort: 443, ToPort: 443, CidrIp: 0.0.0.0/0, Description: HTTPS }
+        - { IpProtocol: tcp, FromPort: 80, ToPort: 80, CidrIp: 0.0.0.0/0, Description: HTTP redirect to HTTPS }
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          DestinationSecurityGroupId: !Ref AppSecurityGroup
+          Description: To the app instances (traffic and health checks)
+      Tags: [{ Key: Name, Value: !Sub "${AWS::StackName}-alb-sg" }]
+
+  AppSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: App instances - HTTP from the ALB only
+      VpcId: !Ref Vpc
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+          Description: HTTPS to AWS APIs, GitHub, npm, IGDB, Steam and package repos
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          DestinationSecurityGroupId: !Ref DbSecurityGroup
+          Description: PostgreSQL
+      Tags: [{ Key: Name, Value: !Sub "${AWS::StackName}-app-sg" }]
+
+  AppIngressFromAlb:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref AppSecurityGroup
+      IpProtocol: tcp
+      FromPort: 80
+      ToPort: 80
+      SourceSecurityGroupId: !Ref AlbSecurityGroup
+      Description: From the ALB
+
+  DbSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: RDS - PostgreSQL from the app instances only
+      VpcId: !Ref Vpc
+      # Replaces the default allow-all egress; the database needs none.
+      SecurityGroupEgress:
+        - { IpProtocol: "-1", CidrIp: 127.0.0.1/32, Description: No outbound traffic }
+      Tags: [{ Key: Name, Value: !Sub "${AWS::StackName}-db-sg" }]
+
+  DbIngressFromApp:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref DbSecurityGroup
+      IpProtocol: tcp
+      FromPort: 5432
+      ToPort: 5432
+      SourceSecurityGroupId: !Ref AppSecurityGroup
+      Description: From the app instances
+
+  # --- Cover storage (D9) ------------------------------------------------------
+  CoversBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: { SSEAlgorithm: AES256 }
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      OwnershipControls:
+        Rules: [{ ObjectOwnership: BucketOwnerEnforced }]
+      VersioningConfiguration:
+        Status: Enabled
+      LifecycleConfiguration:
+        Rules:
+          - Id: expire-old-cover-versions
+            Status: Enabled
+            Prefix: covers/
+            NoncurrentVersionExpiration: { NoncurrentDays: 14 }
+
+  # LabRole is matched by aws:PrincipalArn, which covers the instances'
+  # assumed-role sessions. Console and CLI roles are not affected.
+  CoversBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref CoversBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: "*"
+            Action: "s3:*"
+            Resource: [!GetAtt CoversBucket.Arn, !Sub "${CoversBucket.Arn}/*"]
+            Condition:
+              Bool: { aws:SecureTransport: "false" }
+          - Sid: LabRoleCoversPrefixOnly
+            Effect: Deny
+            Principal: "*"
+            Action: "s3:*"
+            NotResource: !Sub "${CoversBucket.Arn}/covers/*"
+            Condition:
+              ArnEquals: { aws:PrincipalArn: !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/LabRole" }
+          - Sid: LabRoleObjectActionsOnly
+            Effect: Deny
+            Principal: "*"
+            NotAction: [s3:GetObject, s3:PutObject, s3:DeleteObject]
+            Resource: [!GetAtt CoversBucket.Arn, !Sub "${CoversBucket.Arn}/*"]
+            Condition:
+              ArnEquals: { aws:PrincipalArn: !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/LabRole" }
+          - Sid: LabRoleViaGatewayEndpointOnly
+            Effect: Deny
+            Principal: "*"
+            Action: "s3:*"
+            Resource: [!GetAtt CoversBucket.Arn, !Sub "${CoversBucket.Arn}/*"]
+            Condition:
+              ArnEquals: { aws:PrincipalArn: !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/LabRole" }
+              StringNotEquals: { aws:SourceVpce: !Ref S3GatewayEndpoint }
+
+  # --- API secrets (D10). Names are generated to avoid clashes after a Reset. --
+  IgdbSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Description: IGDB (Twitch) client credentials for Game Library
+      SecretString: !Sub '{"IGDB_CLIENT_ID":"${IgdbClientId}","IGDB_CLIENT_SECRET":"${IgdbClientSecret}"}'
+
+  SteamSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Description: Steam Web API key for Game Library
+      SecretString: !Sub '{"STEAM_WEB_API_KEY":"${SteamWebApiKey}"}'
+
+  # --- Database (D7) -----------------------------------------------------------
+  DbSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Private DB subnets in two AZs (no internet route)
+      SubnetIds: [!Ref DbSubnetA, !Ref DbSubnetB]
+
+  DbParameterGroup:
+    Type: AWS::RDS::DBParameterGroup
+    Properties:
+      Description: Game Library - TLS required
+      Family: !Ref DBParameterGroupFamily
+      Parameters:
+        rds.force_ssl: "1"
+
+  Database:
+    Type: AWS::RDS::DBInstance
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      Engine: postgres
+      EngineVersion: !Ref DBEngineVersion
+      DBInstanceClass: !Ref DBInstanceClass
+      DBName: !Ref DBName
+      MultiAZ: true
+      AllocatedStorage: "20"
+      StorageType: gp3
+      StorageEncrypted: true
+      PubliclyAccessible: false
+      DBSubnetGroupName: !Ref DbSubnetGroup
+      VPCSecurityGroups: [!Ref DbSecurityGroup]
+      DBParameterGroupName: !Ref DbParameterGroup
+      MasterUsername: gamelibrary
+      ManageMasterUserPassword: true
+      BackupRetentionPeriod: 1
+      DeleteAutomatedBackups: true
+      DeletionProtection: false
+      AutoMinorVersionUpgrade: true
+
+  # --- Load balancer (D5) ------------------------------------------------------
+  LoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    DependsOn: PublicDefaultRoute
+    Properties:
+      Type: application
+      Scheme: internet-facing
+      Subnets: [!Ref PublicSubnetA, !Ref PublicSubnetB]
+      SecurityGroups: [!Ref AlbSecurityGroup]
+      LoadBalancerAttributes:
+        - { Key: idle_timeout.timeout_seconds, Value: "180" }
+        - { Key: routing.http.drop_invalid_header_fields.enabled, Value: "true" }
+
+  TargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      VpcId: !Ref Vpc
+      Protocol: HTTP
+      Port: 80
+      TargetType: instance
+      HealthCheckProtocol: HTTP
+      HealthCheckPath: /api/health
+      HealthCheckIntervalSeconds: 15
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 2
+      Matcher: { HttpCode: "200" }
+      TargetGroupAttributes:
+        - { Key: deregistration_delay.timeout_seconds, Value: "30" }
+        - { Key: stickiness.enabled, Value: "false" }
+
+  HttpsListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref LoadBalancer
+      Protocol: HTTPS
+      Port: 443
+      SslPolicy: ELBSecurityPolicy-TLS13-1-2-2021-06
+      Certificates: [{ CertificateArn: !Ref CertificateArn }]
+      DefaultActions:
+        - { Type: forward, TargetGroupArn: !Ref TargetGroup }
+
+  HttpListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref LoadBalancer
+      Protocol: HTTP
+      Port: 80
+      DefaultActions:
+        - Type: redirect
+          RedirectConfig: { Protocol: HTTPS, Port: "443", StatusCode: HTTP_301 }
+
+  # --- Compute (D4) ------------------------------------------------------------
+  # User data follows the contract at the top of infra/bootstrap.sh.
+  # CFN_RESOURCE is the ASG's logical ID as a literal (a !Ref would be circular).
+  LaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateData:
+        ImageId: !Ref LatestAmiId
+        InstanceType: !Ref InstanceType
+        IamInstanceProfile: { Name: LabInstanceProfile }
+        SecurityGroupIds: [!Ref AppSecurityGroup]
+        MetadataOptions:
+          HttpEndpoint: enabled
+          HttpTokens: required
+          HttpPutResponseHopLimit: 1
+        BlockDeviceMappings:
+          - DeviceName: /dev/xvda
+            Ebs: { VolumeType: gp3, VolumeSize: 16, Encrypted: true, DeleteOnTermination: true }
+        TagSpecifications:
+          - ResourceType: instance
+            Tags: [{ Key: Name, Value: !Sub "${AWS::StackName}-app" }]
+          - ResourceType: volume
+            Tags: [{ Key: Name, Value: !Sub "${AWS::StackName}-app" }]
+        UserData:
+          Fn::Base64: !Sub |
+            #!/bin/bash
+            set -Eeuo pipefail
+            install -d -m 0755 /etc/game-library
+            cat >/etc/game-library/stack.env <<'EOF'
+            AWS_REGION=${AWS::Region}
+            S3_BUCKET=${CoversBucket}
+            DB_HOST=${Database.Endpoint.Address}
+            DB_PORT=${Database.Endpoint.Port}
+            DB_NAME=${DBName}
+            DB_SECRET_ARN=${Database.MasterUserSecret.SecretArn}
+            IGDB_SECRET_ID=${IgdbSecret}
+            STEAM_SECRET_ID=${SteamSecret}
+            CFN_STACK_NAME=${AWS::StackName}
+            CFN_RESOURCE=AppAutoScalingGroup
+            EOF
+            dnf install -y -q git aws-cfn-bootstrap
+            # Until bootstrap.sh takes over, report failures to the CreationPolicy.
+            trap '/opt/aws/bin/cfn-signal --exit-code 1 --stack ${AWS::StackName} --resource AppAutoScalingGroup --region ${AWS::Region}' ERR
+            git clone --quiet ${RepositoryUrl} /opt/game-library
+            git -C /opt/game-library checkout --quiet --detach ${GitCommit}
+            trap - ERR
+            # bootstrap.sh signals success or failure itself.
+            exec bash /opt/game-library/infra/bootstrap.sh
+
+  # --- Auto Scaling (D6) -------------------------------------------------------
+  # DesiredCapacity is left out on purpose: it starts at MinSize, and an update
+  # doesn't reset whatever target tracking has chosen.
+  AppAutoScalingGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    DependsOn:
+      - AppDefaultRouteA
+      - AppDefaultRouteB
+      - AppSubnetARouteTable
+      - AppSubnetBRouteTable
+      - S3GatewayEndpoint
+      - CoversBucketPolicy
+      - HttpsListener
+    CreationPolicy:
+      ResourceSignal:
+        Count: 2
+        Timeout: PT25M
+    UpdatePolicy:
+      AutoScalingRollingUpdate:
+        MinInstancesInService: 2
+        MaxBatchSize: 2
+        PauseTime: PT25M
+        WaitOnResourceSignals: true
+        SuspendProcesses:
+          - HealthCheck
+          - ReplaceUnhealthy
+          - AZRebalance
+          - AlarmNotification
+          - ScheduledActions
+    Properties:
+      VPCZoneIdentifier: [!Ref AppSubnetA, !Ref AppSubnetB]
+      LaunchTemplate:
+        LaunchTemplateId: !Ref LaunchTemplate
+        Version: !GetAtt LaunchTemplate.LatestVersionNumber
+      MinSize: !Ref MinSize
+      MaxSize: !Ref MaxSize
+      TargetGroupARNs: [!Ref TargetGroup]
+      HealthCheckType: ELB
+      HealthCheckGracePeriod: !Ref HealthCheckGracePeriod
+      DefaultInstanceWarmup: !Ref InstanceWarmup
+      MetricsCollection:
+        - Granularity: 1Minute
+      Tags:
+        - { Key: Name, Value: !Sub "${AWS::StackName}-app", PropagateAtLaunch: true }
+
+  RequestCountScalingPolicy:
+    Type: AWS::AutoScaling::ScalingPolicy
+    Properties:
+      AutoScalingGroupName: !Ref AppAutoScalingGroup
+      PolicyType: TargetTrackingScaling
+      TargetTrackingConfiguration:
+        PredefinedMetricSpecification:
+          PredefinedMetricType: ALBRequestCountPerTarget
+          ResourceLabel: !Sub "${LoadBalancer.LoadBalancerFullName}/${TargetGroup.TargetGroupFullName}"
+        TargetValue: !Ref TargetRequestsPerInstance
+
+  # --- Monitoring (D12) --------------------------------------------------------
+  AlertTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      DisplayName: Game Library alerts
+
+  AlertEmailSubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      TopicArn: !Ref AlertTopic
+      Protocol: email
+      Endpoint: !Ref AlertEmail
+
+  HealthyHostsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: >-
+        Fewer than 2 healthy targets behind the ALB, so the service has lost
+        its redundancy (docs/GROUP_ARCHITECTURE.md, D12).
+      Namespace: AWS/ApplicationELB
+      MetricName: HealthyHostCount
+      Dimensions:
+        - { Name: TargetGroup, Value: !GetAtt TargetGroup.TargetGroupFullName }
+        - { Name: LoadBalancer, Value: !GetAtt LoadBalancer.LoadBalancerFullName }
+      Statistic: Minimum
+      Period: 60
+      EvaluationPeriods: 2
+      DatapointsToAlarm: 2
+      Threshold: 2
+      ComparisonOperator: LessThanThreshold
+      TreatMissingData: breaching
+      AlarmActions: [!Ref AlertTopic]
+      OKActions: [!Ref AlertTopic]
+
+  # Auto-refresh is a console setting, not part of the dashboard body:
+  # keep it at 5 minutes or more when viewing (Learner Lab credits).
+  Dashboard:
+    Type: AWS::CloudWatch::Dashboard
+    Properties:
+      DashboardName: !Sub "${AWS::StackName}-${AWS::Region}"
+      DashboardBody: !Sub
+        - |
+          {"start":"-PT3H","periodOverride":"inherit","widgets":[
+          {"type":"metric","x":0,"y":0,"width":12,"height":6,"properties":{"title":"ALB requests","region":"${AWS::Region}","period":60,"view":"timeSeries","metrics":[
+            ["AWS/ApplicationELB","RequestCount","LoadBalancer","${Lb}",{"stat":"Sum","label":"RequestCount (sum/min)"}],
+            ["AWS/ApplicationELB","RequestCountPerTarget","TargetGroup","${Tg}",{"stat":"Sum","label":"RequestCountPerTarget (sum/min)"}]],
+            "annotations":{"horizontal":[{"label":"Scaling target per instance","value":${TargetRequestsPerInstance}}]}}},
+          {"type":"metric","x":12,"y":0,"width":12,"height":6,"properties":{"title":"Target response time (p95, s)","region":"${AWS::Region}","period":60,"view":"timeSeries","metrics":[
+            ["AWS/ApplicationELB","TargetResponseTime","LoadBalancer","${Lb}",{"stat":"p95"}]]}},
+          {"type":"metric","x":0,"y":6,"width":12,"height":6,"properties":{"title":"5xx errors","region":"${AWS::Region}","period":60,"view":"timeSeries","metrics":[
+            ["AWS/ApplicationELB","HTTPCode_Target_5XX_Count","LoadBalancer","${Lb}",{"stat":"Sum"}],
+            ["AWS/ApplicationELB","HTTPCode_ELB_5XX_Count","LoadBalancer","${Lb}",{"stat":"Sum"}]]}},
+          {"type":"metric","x":12,"y":6,"width":12,"height":6,"properties":{"title":"Target health","region":"${AWS::Region}","period":60,"view":"timeSeries","metrics":[
+            ["AWS/ApplicationELB","HealthyHostCount","TargetGroup","${Tg}","LoadBalancer","${Lb}",{"stat":"Minimum"}],
+            ["AWS/ApplicationELB","UnHealthyHostCount","TargetGroup","${Tg}","LoadBalancer","${Lb}",{"stat":"Maximum"}]],
+            "annotations":{"horizontal":[{"label":"Alarm threshold","value":2}]}}},
+          {"type":"metric","x":0,"y":12,"width":12,"height":6,"properties":{"title":"Auto Scaling group","region":"${AWS::Region}","period":60,"view":"timeSeries","metrics":[
+            ["AWS/AutoScaling","GroupInServiceInstances","AutoScalingGroupName","${Asg}",{"stat":"Average"}],
+            ["AWS/AutoScaling","GroupDesiredCapacity","AutoScalingGroupName","${Asg}",{"stat":"Average"}]]}},
+          {"type":"metric","x":12,"y":12,"width":12,"height":6,"properties":{"title":"EC2 CPU (ASG average, %)","region":"${AWS::Region}","period":300,"view":"timeSeries","metrics":[
+            ["AWS/EC2","CPUUtilization","AutoScalingGroupName","${Asg}",{"stat":"Average"}]]}},
+          {"type":"metric","x":0,"y":18,"width":8,"height":6,"properties":{"title":"RDS CPU (%)","region":"${AWS::Region}","period":60,"view":"timeSeries","metrics":[
+            ["AWS/RDS","CPUUtilization","DBInstanceIdentifier","${Db}",{"stat":"Average"}]]}},
+          {"type":"metric","x":8,"y":18,"width":8,"height":6,"properties":{"title":"RDS connections","region":"${AWS::Region}","period":60,"view":"timeSeries","metrics":[
+            ["AWS/RDS","DatabaseConnections","DBInstanceIdentifier","${Db}",{"stat":"Average"}]]}},
+          {"type":"metric","x":16,"y":18,"width":8,"height":6,"properties":{"title":"RDS free storage (bytes)","region":"${AWS::Region}","period":300,"view":"timeSeries","metrics":[
+            ["AWS/RDS","FreeStorageSpace","DBInstanceIdentifier","${Db}",{"stat":"Minimum"}]]}}]}
+        - Lb: !GetAtt LoadBalancer.LoadBalancerFullName
+          Tg: !GetAtt TargetGroup.TargetGroupFullName
+          Asg: !Ref AppAutoScalingGroup
+          Db: !Ref Database
+
+Outputs:
+  AppUrl:
+    Description: The app over HTTPS (self-signed certificate, so the browser warns)
+    Value: !Sub "https://${LoadBalancer.DNSName}"
+  BucketName:
+    Value: !Ref CoversBucket
+  DatabaseEndpoint:
+    Value: !GetAtt Database.Endpoint.Address
+  AutoScalingGroupName:
+    Value: !Ref AppAutoScalingGroup
+  TargetGroupFullName:
+    Value: !GetAtt TargetGroup.TargetGroupFullName
+  DashboardUrl:
+    Value: !Sub "https://${AWS::Region}.console.aws.amazon.com/cloudwatch/home?region=${AWS::Region}#dashboards/dashboard/${Dashboard}"
+  GitCommit:
+    Description: The commit every instance builds
+    Value: !Ref GitCommit

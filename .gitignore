@@ -12,3 +12,6 @@ data/
 src/generated/prisma/
 *.sqlite
 *.sqlite-*
+
+# Secrets and alert email for infra/deploy.sh (D10)
+infra/deploy.env
