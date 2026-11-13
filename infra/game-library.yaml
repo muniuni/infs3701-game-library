@@ -19,6 +19,7 @@ Metadata:
           - HealthCheckGracePeriod
           - InstanceWarmup
           - TargetRequestsPerInstance
+          - TargetCpuUtilization
       - Label: { default: "Database (D7)" }
         Parameters: [DBInstanceClass, DBEngineVersion, DBParameterGroupFamily, DBName]
 
@@ -67,19 +68,33 @@ Parameters:
     MinValue: 2
   HealthCheckGracePeriod:
     Type: Number
-    Default: 900
-    Description: Seconds. Placeholder until boot-to-healthy time is measured (D6).
+    Default: 360
+    Description: >-
+      Seconds. About 1.75x the measured boot-to-healthy time (187-207 s,
+      14 Nov), so slow builds aren't replaced mid-boot (D6).
   InstanceWarmup:
     Type: Number
-    Default: 900
-    Description: Seconds. Placeholder until boot-to-healthy time is measured (D6).
+    Default: 240
+    Description: >-
+      Seconds. Measured boot-to-healthy (<= 207 s, 14 Nov) plus time for the
+      new instance to take its share of requests (D6).
   TargetRequestsPerInstance:
     Type: Number
-    Default: 300
+    Default: 1500
     MinValue: 1
     Description: >-
-      Target tracking value for ALBRequestCountPerTarget (requests per minute).
-      Placeholder; set to about half of one t3.small's measured capacity (D6).
+      Main scaling signal (ALBRequestCountPerTarget, requests per minute per
+      instance). Half of 3,000 req/min, the load one t3.small sustained at its
+      20% CPU baseline in the 14 Nov test (D6).
+  TargetCpuUtilization:
+    Type: Number
+    Default: 20
+    MinValue: 1
+    MaxValue: 100
+    Description: >-
+      Second scaling signal (ASGAverageCPUUtilization, %). The t3.small CPU
+      baseline; catches CPU-heavy work such as Steam import and Sharp that
+      request count misses (D6).
   DBInstanceClass:
     Type: String
     Default: db.t3.micro
@@ -625,6 +640,18 @@ Resources:
           ResourceLabel: !Sub "${LoadBalancer.LoadBalancerFullName}/${TargetGroup.TargetGroupFullName}"
         TargetValue: !Ref TargetRequestsPerInstance
 
+  # Second policy: the group scales out if either policy asks, and scales in
+  # only when both allow it. New instances' build CPU is excluded by warmup.
+  CpuScalingPolicy:
+    Type: AWS::AutoScaling::ScalingPolicy
+    Properties:
+      AutoScalingGroupName: !Ref AppAutoScalingGroup
+      PolicyType: TargetTrackingScaling
+      TargetTrackingConfiguration:
+        PredefinedMetricSpecification:
+          PredefinedMetricType: ASGAverageCPUUtilization
+        TargetValue: !Ref TargetCpuUtilization
+
   # --- Monitoring (D12) --------------------------------------------------------
   AlertTopic:
     Type: AWS::SNS::Topic
@@ -685,7 +712,8 @@ Resources:
             ["AWS/AutoScaling","GroupInServiceInstances","AutoScalingGroupName","${Asg}",{"stat":"Average"}],
             ["AWS/AutoScaling","GroupDesiredCapacity","AutoScalingGroupName","${Asg}",{"stat":"Average"}]]}},
           {"type":"metric","x":12,"y":12,"width":12,"height":6,"properties":{"title":"EC2 CPU (ASG average, %)","region":"${AWS::Region}","period":300,"view":"timeSeries","metrics":[
-            ["AWS/EC2","CPUUtilization","AutoScalingGroupName","${Asg}",{"stat":"Average"}]]}},
+            ["AWS/EC2","CPUUtilization","AutoScalingGroupName","${Asg}",{"stat":"Average"}]],
+            "annotations":{"horizontal":[{"label":"CPU scaling target (t3.small baseline)","value":${TargetCpuUtilization}}]}}},
           {"type":"metric","x":0,"y":18,"width":8,"height":6,"properties":{"title":"RDS CPU (%)","region":"${AWS::Region}","period":60,"view":"timeSeries","metrics":[
             ["AWS/RDS","CPUUtilization","DBInstanceIdentifier","${Db}",{"stat":"Average"}]]}},
           {"type":"metric","x":8,"y":18,"width":8,"height":6,"properties":{"title":"RDS connections","region":"${AWS::Region}","period":60,"view":"timeSeries","metrics":[

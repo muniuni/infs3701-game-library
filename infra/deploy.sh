@@ -15,6 +15,9 @@
 #
 # Extra ParameterKey=Value arguments override template defaults, e.g.
 #   infra/deploy.sh TargetRequestsPerInstance=450 HealthCheckGracePeriod=600
+# On an existing stack, a parameter you don't pass keeps its previous value
+# (UsePreviousValue), even if the template default has changed since. Pass the
+# changed ones explicitly; a new stack after a Reset uses the defaults.
 set -Eeuo pipefail
 
 # Empty arrays use ${a[@]+"${a[@]}"}: macOS ships bash 3.2, where "${a[@]}" trips set -u.
@@ -32,7 +35,7 @@ overrides=()
 for argument in "$@"; do
   case $argument in
     --disable-rollback) rollback_args=(--disable-rollback) ;;
-    -h | --help) sed -n '2,17p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h | --help) sed -n '2,20p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *=*) overrides+=("$argument") ;;
     *) die "unknown argument: $argument (see --help)" ;;
   esac

@@ -1,6 +1,6 @@
 # Group Architecture: Game Library on a Scalable, Highly Available AWS Stack
 
-Status: design locked 14 Nov 2026. S1 and S2 done; S3 files written, first AWS deploy pending. Due: Tuesday 17 Nov 2026, 4:00 pm (Sydney).
+Status: design locked 14 Nov 2026; D6 revised the same day from S3 measurements. S1–S3 done; S4 (evidence run) and S5 (documents) to go. Handover notes for the group are in §10. Due: Tuesday 17 Nov 2026, 4:00 pm (Sydney).
 
 This document records what the group decided for the INFS3701 group assignment, why, and how the work is split into implementation sessions. It is the reference for every implementation session. Change it here first if a decision changes.
 
@@ -29,7 +29,7 @@ We take **Option A**: scale up Wataru's individual service, Game Library, a Next
 | Least-privilege IAM, tight security groups | LabInstanceProfile in the lab, with the intended least-privilege policy written out; bucket policy restricting LabRole; SG chain ALB → app → DB (D3, D9, D14) | Refused S3 action (e.g. ListBucket) from an instance; SG rules screenshot |
 | Encryption in transit and at rest | HTTPS on the ALB (self-signed cert in ACM); RDS TLS enforced; S3 TLS-only policy; RDS, EBS, S3 and Secrets Manager encrypted at rest (D10, D11) | Browser on `https://`; `pg_stat_ssl` showing TLS; S3/RDS/EBS encryption settings |
 | Usable interface | The existing Game Library UI, served over HTTPS | The live demo in the video |
-| Going Further: automate the scaling | ASG target tracking on requests per target, threshold justified from measured capacity (D6) | Load test with scale-out graphs (in-service count, request count, latency) |
+| Going Further: automate the scaling | ASG target tracking on requests per target (1,500 req/min) plus CPU (20%, the t3.small baseline), thresholds justified from measured capacity (D6) | Load test with scale-out graphs (in-service count, request count, latency) |
 | Deliverables: design doc (<8 pages, <4,000 words, PDF), diagram (≤2 pages), 12-month cost estimate (≤2 pages, us-east-1, Pricing Calculator), video (≤2:30), cover sheet, individual contribution statements | See §9, session S5 | — |
 
 Clarifications from the Q&A forum that shaped the design:
@@ -133,22 +133,50 @@ Each decision lists what we chose, why, and what we gave up. The numbered user a
 
 ### D6. Auto Scaling (Going Further)
 
+Revised 14 Nov after the S3 measurements: second policy on CPU, capacity defined at the CPU baseline, values filled in.
+
 - **Decision:**
-  - **Sizes:** min **2**, desired **2**, max **4**, in the two private app subnets.
-  - **Health checks:** ELB. Health-check grace period and default instance warmup are set from the **measured** boot-to-healthy time; the placeholder is 900 s until measured.
+  - **Sizes:** min **2**, max **4**, in the two private app subnets. The group starts at min (2). `DesiredCapacity` is not set in the template, so a redeploy doesn't reset what scaling has chosen.
+  - **Health checks:** ELB. **Grace period 360 s** and **default instance warmup 240 s**, set from the measured boot-to-healthy time of 187–207 s (S3, §9).
   - **Group metrics:** collection enabled, which is free at 1-minute granularity.
   - **Stack creation:** a `CreationPolicy` on the ASG waits for `cfn-signal` from the two initial instances (timeout 25 min). Stack `CREATE_COMPLETE` therefore means the app is actually serving.
-  - **Scaling policy:** **target tracking on `ALBRequestCountPerTarget`.** The target value is about **half of one t3.small's measured capacity** (requests per minute). It is a stack parameter, measured in the first AWS session (S3, §9).
+  - **Scaling policies (target tracking, both stack parameters):**
+    - **Main signal: `ALBRequestCountPerTarget` at 1,500 requests per minute per instance.** This is the one we demonstrate.
+    - **Second signal: `ASGAverageCPUUtilization` at 20%**, the t3.small CPU baseline.
+    - The group scales out when either policy asks for it, and scales in only when both allow it.
 - **Why:**
-  - **Metric:** request count per target tracks user demand directly and can be triggered on purpose with a load tool for the video. CPU is distorted by the build at launch and by t3 burst credits.
-  - **Target at about half capacity:** a new instance takes minutes to build and pass health checks, so the group has to start scaling while the current instances still have headroom. If the target were near full capacity, the existing instances would saturate before the new ones were ready.
+  - **Business need:** Game Library is single-user today, but it is designed to grow to many users. The app tier is stateless, so more users means more instances behind the same ALB. Scaling has to follow user demand without someone resizing the fleet by hand.
+  - **Request count as the main signal:**
+    - It tracks user demand directly.
+    - It can be triggered on purpose with a load tool for the video.
+  - **CPU as the second signal:**
+    - Request count treats all requests as equal. A few heavy requests can load an instance without raising the count much: a Steam import enriches up to 20 games per request, and a cover upload is re-encoded with Sharp.
+    - CPU catches that work.
+    - The warmup (240 s) is longer than the build (done by ~190 s), so a new instance's build CPU is not counted.
+  - **What "capacity" means here:** **3,000 req/min per instance**, the load one t3.small sustained at its baseline CPU without extra charges.
+    - In the S3 test, 50 req/s per instance used 19% CPU, just under the 20% baseline.
+    - At that load, server-side p95 was 0.05 s with no errors.
+    - A t3 in its default unlimited mode can run above baseline. Extra charges apply only when its CPU averaged over 24 hours stays above baseline. Capacity is therefore defined as what the instance can sustain at baseline.
+  - **Target at about half capacity (1,500 req/min):** a new instance takes 6–8 minutes to start serving traffic after load rises:
+    - about 3 minutes for the target-tracking alarm (3 one-minute datapoints);
+    - 1–2 minutes of CloudWatch delay;
+    - about 3.5 minutes to build and pass health checks.
+    
+    The group therefore has to start scaling while the current instances still have headroom. If the target were near full capacity, the existing instances would run past baseline, or saturate, before the new ones were ready.
   - **Min 2 across 2 AZs:** this is the availability floor. One instance per AZ survives the loss of either.
-- **How capacity is measured:**
-  - Hold the group at 2 instances: set min = max = 2 for the measurement deploy, or suspend the scaling processes.
-  - Ramp load through the ALB with a load tool that accepts the self-signed certificate (e.g. k6 with `insecureSkipTLSVerify`). Use a realistic mix: the library page, `/api/games`, and a cover.
-  - Find the rate at which p95 latency exceeds ~1 s, errors appear, or CPU is sustained above ~80%.
-  - Per-instance capacity = that sustained rate ÷ 2. Record the numbers for the doc.
-- **Trade-off:** ALB request count treats all requests as equal, so a few heavy Steam imports can overload an instance without many requests. That's accepted and documented. Step scaling was rejected as more to tune for no benefit here.
+- **How capacity was measured (S3, 14 Nov):**
+  - The group was held at 2 by suspending `AlarmNotification`.
+  - `infra/load/capacity.js` (k6, accepts the self-signed certificate) sent a fixed-rate staircase of 5 → 100 req/s through the ALB: 50% `/`, 30% `/api/games`, 20% an uploaded cover; 3 minutes per step.
+  - Per-instance rate = total ÷ 2. CloudWatch gave server-side latency and CPU, because k6's latency includes the round trip from Sydney.
+  - Numbers in S3, §9.
+- **Limitations (state them in the design document):**
+  - **One measurement:** a single run on one pair of instances. The instance's actual ceiling wasn't reached: at 50 req/s per instance there were no errors, p95 was 0.05 s and CPU was 19%. So 3,000 req/min is a baseline-CPU figure, not a saturation point.
+  - **No heavy requests in the test mix:** no Steam imports or cover uploads. The CPU policy exists for those, but its threshold wasn't tested under that load.
+  - **CPU is a 5-minute metric:** without detailed monitoring (paid), EC2 reports CPU every 5 minutes. The CPU policy therefore reacts more slowly than the request-count policy. The production option is detailed monitoring at 1 minute.
+- **Trade-off:**
+  - Two policies are slightly harder to explain than one. Each covers a load pattern the other misses.
+  - Scaling at baseline CPU adds instances earlier than strictly necessary. That trades a little instance cost for latency headroom and no surplus-credit charges.
+  - Step scaling was rejected as more to tune for no benefit here.
 
 ### D7. Database: RDS for PostgreSQL, Multi-AZ
 
@@ -323,7 +351,8 @@ Each decision lists what we chose, why, and what we gave up. The numbered user a
 - 4 public IPv4 addresses.
 - Secrets Manager: 3 secrets plus API calls.
 - S3: Standard, ~1 GB including old versions, requests.
-- CloudWatch: 1 dashboard, 3 alarms (1 HA alarm plus 2 created by target tracking), and metrics.
+- CloudWatch: 1 dashboard, 5 alarms (1 HA alarm plus 2 created by each of the two target-tracking policies), and metrics.
+- EC2 CPU credits: assume none. The CPU policy keeps the fleet's average near the t3.small baseline, and surplus credits are billed only when an instance's 24-hour average exceeds it (D6). Say so in the estimate's assumptions.
 - SNS email notifications.
 - Data transfer out.
 - The ACM imported certificate and the S3 gateway endpoint are free; say so.
@@ -334,19 +363,19 @@ Rough order of magnitude: **~$170/month**, with the NAT gateways the largest sha
 
 | Unknown | How to check | Fallback if it fails |
 | --- | --- | --- |
-| `ManageMasterUserPassword` works under the Lab role | Stack creates the DB and the `rds!…` secret | Stack-generated secret (`AWS::SecretsManager::Secret` with `GenerateSecretString`) used through a dynamic reference |
-| SSM Session Manager works with LabInstanceProfile | Start a session to an instance | EC2 console system log; temporarily log bootstrap output to CloudWatch Logs |
-| `cfn-signal` is available and allowed on AL2023 | `dnf install aws-cfn-bootstrap`; stack reaches `CREATE_COMPLETE` | Drop the CreationPolicy and rely on target health |
-| Boot-to-healthy time | Timestamps in `cloud-init-output.log` and target health | Tune grace/warmup; if far too slow, consider building once and sharing the build output via S3 (needs a group decision) |
-| Prisma advisory lock with 2 instances migrating together | Both instances boot cleanly; `_prisma_migrations` has one row per migration | Only the first instance migrates (e.g. a lock row), or migrate from `deploy.sh` |
-| Single t3.small capacity | Load test (D6) | — (this sets the scaling target) |
-| RDS offers the PostgreSQL major version used locally (18) on `db.t3.micro` | `aws rds describe-orderable-db-instance-options --engine postgres --engine-version 18.4 --db-instance-class db.t3.micro` | Use the newest major that is offered, and change `compose.yaml` to match |
-| Template size within the 51,200-byte inline limit | `aws cloudformation validate-template` | Upload the template to an S3 bucket first |
-| Secrets after a Reset | Second rebuild succeeds | Generated names already avoid clashes (D10) |
-| Node.js version on AL2023 | `dnf list nodejs*` | Install via `nvm` |
-| Pages work across instances (consistent build ID, D4) | Load one page's HTML, then fetch every `/_next/static/...` URL it references many times through the ALB. None may return 404 | Fix `generateBuildId`; check that both instances built the same SHA |
-| DB TLS settings accepted by both Prisma Migrate and the `pg` adapter | `prisma migrate deploy` and the app both connect with RDS `force_ssl=1` | The wrapper builds a separate migrate URL in Prisma's TLS syntax (`sslmode=require&sslcert=<ca>&sslaccept=strict`) and passes `ssl: { ca, rejectUnauthorized: true }` to the adapter in code. Test this locally first against a TLS-enabled Docker Postgres in S2, so the first test isn't in a paid session. **S2 result (14 Nov, TLS-only Docker Postgres 18, self-signed CA):** the fallback is required. Prisma's engine treats `sslmode=verify-full` as no verification (it connected with a decoy CA), accepts any certificate unless `sslaccept=strict` is set, and can't read a multi-certificate bundle. A URL `sslmode` in node-postgres replaces the `ssl` object passed in code. Implemented: no TLS parameters in `DATABASE_URL`; TLS from `DATABASE_CA_FILE` (pg in code, Prisma in its own syntax); `infra/select-db-ca.sh` picks the single CA that verifies the endpoint. Migrate and app both pass with the right CA and fail with a decoy CA or a host-name mismatch |
-| The RDS regional bundle contains a CA that verifies the endpoint on its own (the server sends its intermediate) | `infra/select-db-ca.sh` succeeds in `cloud-init-output.log`; `SELECT ssl FROM pg_stat_ssl` is true | Pin `CACertificateIdentifier` and fetch that CA's intermediate as well; or append intermediates to the selected file |
+| `ManageMasterUserPassword` works under the Lab role | Stack creates the DB and the `rds!…` secret | Stack-generated secret (`AWS::SecretsManager::Secret` with `GenerateSecretString`) used through a dynamic reference **S3 (14 Nov): works.** The DB was created with an `rds!…` secret (status `active`), and both instances read it through the wrapper. |
+| SSM Session Manager works with LabInstanceProfile | Start a session to an instance | EC2 console system log; temporarily log bootstrap output to CloudWatch Logs **S3: works.** Both instances are `Online` in Systems Manager (agent 3.3.5828.0), and Run Command executed on both. Interactive `start-session` also needs the Session Manager plugin on the Mac. |
+| `cfn-signal` is available and allowed on AL2023 | `dnf install aws-cfn-bootstrap`; stack reaches `CREATE_COMPLETE` | Drop the CreationPolicy and rely on target health **S3: works.** CloudFormation received SUCCESS signals from both instances (and FAILURE signals from the first, failed boot), so the CreationPolicy is kept. |
+| Boot-to-healthy time | Timestamps in `cloud-init-output.log` and target health | Tune grace/warmup; if far too slow, consider building once and sharing the build output via S3 (needs a group decision) **S3 (14 Nov): ≈ 3.1–3.5 min (187–207 s)**, measured by Wataru (details in the S3 checklist). Fast enough: no shared build needed. |
+| Prisma advisory lock with 2 instances migrating together | Both instances boot cleanly; `_prisma_migrations` has one row per migration | Only the first instance migrates (e.g. a lock row), or migrate from `deploy.sh` **S3: one row** in `_prisma_migrations` (`20261114000000_postgres_baseline`, not rolled back). The 1b instance applied it; the 1a instance found nothing pending ~3 s later. The boots were close but not exactly concurrent, so the lock itself wasn't exercised. Rolling updates add no new migrations, so this is accepted. |
+| Single t3.small capacity | Load test (D6) | — (this sets the scaling target) **S3:** measured by Wataru with `infra/load/capacity.js`. |
+| RDS offers the PostgreSQL major version used locally (18) on `db.t3.micro` | `aws rds describe-orderable-db-instance-options --engine postgres --engine-version 18.4 --db-instance-class db.t3.micro` | Use the newest major that is offered, and change `compose.yaml` to match **S3: yes.** RDS created 18.3 on db.t3.micro, Multi-AZ (primary 1b, standby 1a). No change to `compose.yaml`. |
+| Template size within the 51,200-byte inline limit | `aws cloudformation validate-template` | Upload the template to an S3 bucket first **S3: yes.** 26.5 KB, deployed inline. |
+| Secrets after a Reset | Second rebuild succeeds | Generated names already avoid clashes (D10) **Not yet testable;** checked by the S4 rebuild after the Reset. |
+| Node.js version on AL2023 | `dnf list nodejs*` | Install via `nvm` **S3: `nodejs24` package works** (Node v24.22.3, npm 11.19.1). No nvm needed. |
+| Pages work across instances (consistent build ID, D4) | Load one page's HTML, then fetch every `/_next/static/...` URL it references many times through the ALB. None may return 404 | Fix `generateBuildId`; check that both instances built the same SHA **S3: works.** The 8 `/_next/static/` URLs referenced by `/` were each fetched 6 times through the ALB: 48/48 returned 200, 24 from each AZ. |
+| DB TLS settings accepted by both Prisma Migrate and the `pg` adapter | `prisma migrate deploy` and the app both connect with RDS `force_ssl=1` | The wrapper builds a separate migrate URL in Prisma's TLS syntax (`sslmode=require&sslcert=<ca>&sslaccept=strict`) and passes `ssl: { ca, rejectUnauthorized: true }` to the adapter in code. Test this locally first against a TLS-enabled Docker Postgres in S2, so the first test isn't in a paid session. **S2 result (14 Nov, TLS-only Docker Postgres 18, self-signed CA):** the fallback is required. Prisma's engine treats `sslmode=verify-full` as no verification (it connected with a decoy CA), accepts any certificate unless `sslaccept=strict` is set, and can't read a multi-certificate bundle. A URL `sslmode` in node-postgres replaces the `ssl` object passed in code. Implemented: no TLS parameters in `DATABASE_URL`; TLS from `DATABASE_CA_FILE` (pg in code, Prisma in its own syntax); `infra/select-db-ca.sh` picks the single CA that verifies the endpoint. Migrate and app both pass with the right CA and fail with a decoy CA or a host-name mismatch **S3 (RDS, `rds.force_ssl=1`): both work.** Migrate applied the baseline over TLS, and `pg_stat_ssl` shows TLSv1.3 (`TLS_AES_256_GCM_SHA384`) for every app connection from both subnets. A plaintext connection is refused (`no pg_hba.conf entry … no encryption`), as is TLS without the RDS CA (`self-signed certificate in certificate chain`). |
+| The RDS regional bundle contains a CA that verifies the endpoint on its own (the server sends its intermediate) | `infra/select-db-ca.sh` succeeds in `cloud-init-output.log`; `SELECT ssl FROM pg_stat_ssl` is true | Pin `CACertificateIdentifier` and fetch that CA's intermediate as well; or append intermediates to the selected file **S3: yes.** `select-db-ca.sh` picked `Amazon RDS us-east-1 Root CA RSA2048 G1` on both instances. No CA pinning needed. |
 
 ## 7. Evidence plan (doc appendix and video)
 
@@ -436,8 +465,8 @@ Each session is a separate Claude Code session that starts by reading this docum
 ### S3. CloudFormation stack and first deploy (AWS)
 
 - [x] `infra/game-library.yaml` (YAML): VPC, subnets, IGW, 2 NAT gateways, route tables, S3 gateway endpoint, SGs, S3 bucket and policy, IGDB/Steam secrets (NoEcho params), RDS parameter group, subnet group and Multi-AZ instance, ALB, listeners and target group, launch template (user data checks out the `GitCommit` parameter), ASG with CreationPolicy, `AutoScalingRollingUpdate` update policy and target tracking policy, SNS topic and subscription, alarm, dashboard. Outputs: HTTPS URL, bucket name, DB endpoint.
-  - As built (15 Nov, before any AWS run):
-    - `DBEngineVersion` (`18`) and `DBParameterGroupFamily` (`postgres18`) are parameters, so the §6 PostgreSQL-version fallback is a parameter change. Scaling target (300 req/min per instance), grace period and warmup (900 s) are parameters holding placeholders until measured.
+  - As built (14 Nov, before any AWS run):
+    - `DBEngineVersion` (`18`) and `DBParameterGroupFamily` (`postgres18`) are parameters, so the §6 PostgreSQL-version fallback is a parameter change. The scaling targets (1,500 req/min per instance and 20% CPU), the grace period (360 s) and the warmup (240 s) are parameters, with defaults set from the S3 measurements (D6).
     - The ASG sets min and max but no `DesiredCapacity`. It starts at min (2), and a later update doesn't reset what target tracking has chosen.
     - Rolling update: min 2 in service, batch 2, waits for `cfn-signal`, and suspends health-check replacement and scaling while it rolls. CloudFormation requires `MinInstancesInService` < `MaxSize`, so for the capacity measurement keep max at 4 and hold the group at 2 with `aws autoscaling suspend-processes --scaling-processes AlarmNotification` (resume afterwards), rather than deploying min = max = 2.
     - The ASG waits for both NAT routes, the S3 endpoint, the bucket policy and the HTTPS listener, so instances boot with working outbound access. User data signals failure itself if the clone or checkout fails; after that, `bootstrap.sh` signals.
@@ -445,12 +474,30 @@ Each session is a separate Claude Code session that starts by reading this docum
     - The dashboard's auto-refresh interval is a console setting, not part of the template. Set it to 5 minutes or more when viewing.
 - [x] `infra/deploy.sh`, `infra/deploy.env.example`, and `infra/deploy.env` added to `.gitignore`.
   - `deploy.sh` reuses an imported `*.us-east-1.elb.amazonaws.com` self-signed certificate if ACM still has one, otherwise generates and imports one. The name matches the ALB's DNS name, so the only browser warning is the untrusted issuer. Extra `Key=Value` arguments override template parameters (e.g. `TargetRequestsPerInstance=450`). Works with macOS's bash 3.2. Needs AWS CLI v2.
-- [ ] Validate locally: `cfn-lint infra/game-library.yaml`, then `aws cloudformation validate-template`. **cfn-lint 1.60.1 clean (15 Nov); template 26.5 KB, under the inline limit.** `shellcheck` clean on `deploy.sh` and the rendered user data. `validate-template` still to run with Lab credentials.
+- [ ] Validate locally: `cfn-lint infra/game-library.yaml`, then `aws cloudformation validate-template`. **cfn-lint 1.60.1 clean (14 Nov); template 26.5 KB, under the inline limit.** `shellcheck` clean on `deploy.sh` and the rendered user data. `validate-template` still to run with Lab credentials.
 - [ ] Record the Lab credit balance, then deploy with `--disable-rollback`. Confirm the SNS subscription email.
-  - First deploy (15 Nov, commit `e0b8a16`): every resource except the ASG was created. Both instances signalled FAILURE 24 s into `bootstrap.sh`, because AL2023's `mkswap` (util-linux) has no `-q` option. The S2 container test never reached the swap step, because the `amazonlinux:2023` image ships without util-linux. Fixed by dropping `-q`, and the fix was checked in an AL2023 container with util-linux installed. Everything before that step worked on real instances: user data, the clone at the pinned commit, IMDSv2, and the `nodejs24` and Nginx packages.
-- [ ] Work through every row of §6 and record the results in this document.
-- [ ] Measure boot-to-healthy time and single-instance capacity (D6). Set the scaling target (≈ half capacity), grace period and warmup as parameter defaults, and record the numbers here.
-- [ ] Smoke test: add a game, upload a cover, IGDB autofill, Steam import, export, and `X-Served-By` alternating.
+  - First deploy (14 Nov, commit `e0b8a16`): every resource except the ASG was created. Both instances signalled FAILURE 24 s into `bootstrap.sh`, because AL2023's `mkswap` (util-linux) has no `-q` option. The S2 container test never reached the swap step, because the `amazonlinux:2023` image ships without util-linux. Fixed by dropping `-q`, and the fix was checked in an AL2023 container with util-linux installed. Everything before that step worked on real instances: user data, the clone at the pinned commit, IMDSv2, and the `nodejs24` and Nginx packages.
+- [ ] Work through every row of §6 and record the results in this document. **Done 14 Nov** except the rows that depend on the measurements below and "Secrets after a Reset" (S4). Also confirmed: the HTTP listener returns 301 to HTTPS, and the ALB negotiates TLS 1.3 with the self-signed `*.us-east-1.elb.amazonaws.com` certificate.
+- [x] Measure boot-to-healthy time and single-instance capacity (D6). Set the scaling target (≈ half capacity), grace period and warmup as parameter defaults, and record the numbers here.
+  - Boot-to-healthy (14 Nov deploy, both instances, Sydney time; measured by Wataru):
+    - ASG activity start (t0) 02:03:32; instance launch time 02:03:31.
+    - System log: `[bootstrap +127s] app healthy through Nginx` at 164.5 s since boot. Bootstrap itself took 127 s: packages 11 s, swap 16 s, `npm ci` 33 s, build 60 s, migrate 3 s. The remaining ~38 s before it is kernel boot, cloud-init and user data.
+    - CloudFormation SUCCESS signals: 02:06:39 (t0 + 187 s).
+    - Target healthy: `HealthyHostCount` reached 2 in the 15:06 UTC minute (02:06 Sydney), i.e. by t0 + 207 s at the latest. That fits two passing 15 s health checks after the app came up.
+    - **Boot-to-healthy ≈ 3.1–3.5 min (187–207 s).** One sample of two instances launched together.
+    - **Template defaults set from this (14 Nov, not deployed; the next rebuild picks them up):** `HealthCheckGracePeriod` 360 s (≈ 1.75 × 207 s, because replacing a slow-but-fine instance mid-build would cause a launch loop). `InstanceWarmup` 240 s (healthy by ≤ 207 s, plus time to take its share of requests).
+    - Scale-out reaction time: the target-tracking high alarm needs 3 one-minute datapoints, plus ~1–2 min of CloudWatch delay, then ~3.5 min to boot. A new instance therefore takes traffic about 6–8 min after load rises. That is why the target sits at about half capacity (D6).
+  - Capacity tool: `infra/load/capacity.js` (k6). It runs a fixed-rate staircase (default 5–100 req/s, 3 min per step) with the D6 mix of 50% `/`, 30% `/api/games` and 20% uploaded covers, and prints achieved rate, p95, errors and per-instance rate for each step. Hold the group at 2 with `suspend-processes --scaling-processes AlarmNotification`. k6 latency includes the round trip from Sydney (p50 ≈ 0.5 s even at 1 req/s), so judge the ~1 s rule on the dashboard's server-side `TargetResponseTime` p95.
+  - Capacity run (14 Nov, 02:29–02:57 Sydney, group held at 2 with AlarmNotification suspended): the k6 staircase was 5 → 100 req/s, and **no step saturated**.
+    - k6: achieved rate matched target at every step (99.9/100 at the top); 0.00% errors; p95 280–394 ms, flat, almost all WAN round trip.
+    - At the top step, 100 req/s = 50 req/s per instance (`RequestCountPerTarget` 3,000/min):
+      - server-side `TargetResponseTime` p95 0.04–0.05 s, p99 ≤ 0.29 s;
+      - EC2 CPU 19.0% per instance (5-min max), rising roughly linearly from 3% at 5 req/s per instance;
+      - RDS CPU ≤ 9%; no 5xx errors.
+    - So D6's saturation signals (p95 > ~1 s, errors, CPU > ~80%) were not reached. Per-instance capacity is **at least 50 req/s (3,000 req/min)**. The test didn't find the ceiling.
+    - The 19% CPU at the top step is just under the t3.small CPU baseline (20%). Above that, a t3 in its default unlimited mode runs on surplus CPU credits, which are billed.
+    - Scaling target: **decided 14 Nov (Wataru)**. 1,500 req/min per instance on request count, plus a second policy at 20% average CPU. Defaults set in the template. Rationale and limitations are in D6.
+- [x] Smoke test: add a game, upload a cover, IGDB autofill, Steam import, export, and `X-Served-By` alternating. **Passed 14 Nov (Wataru, browser):** all of them, with the footer badge alternating between instances.
 - [ ] Record credits, then **Reset the Lab**.
 
 ### S4. Evidence run (AWS)
@@ -473,3 +520,39 @@ Each session is a separate Claude Code session that starts by reading this docum
 - [ ] Final check of all deliverables against the brief and marking checklist; follow the Moodle naming convention.
 
 Suggested timing: S1 and S2 on 14 Nov, S3 on 15 Nov, S4 on 15–16 Nov, S5 on 16 Nov, leaving the morning of 17 Nov as a buffer before the 4:00 pm deadline.
+
+## 10. Handover to the group
+
+For whoever finalises the design document, the diagram and the cost estimate (S5). "Now" means the design and numbers are settled after S3. "After S4" means it needs the evidence run.
+
+**Design document**
+
+- *Now:*
+  - Objective and route (D1). The app is single-user today and designed to grow to many users.
+  - Architecture and services (§3, D2–D16).
+  - Networking, security and data (D2, D3, D7–D11, D14).
+  - Scalability and the auto-scaling design, including the measured numbers and their limitations (D6, S3 in §9).
+  - The cost section's structure and assumptions (§5).
+  - The AI-use statement: CloudFormation was drafted with Claude Code from this document. Also the S3 build evidence: the first deploy's failure and fix, and the §6 results.
+- *After S4:*
+  - Failover and AZ-simulation results (failed requests and recovery times).
+  - The alarm firing and returning to OK, with the email.
+  - The scale-out graph from 2 to 3–4 instances and back.
+  - The refused S3 action from an instance.
+  - Screenshots for the appendix and the stack events timeline from the clean rebuild.
+  - The Lab credits used, for the cost section.
+
+**Diagram**
+
+- *Now:*
+  - Every change in §8.
+  - Label the ASG with min 2 / max 4 and both scaling targets: 1,500 req/min per instance and 20% CPU.
+  - Don't put the RDS primary in a fixed AZ. The primary was in 1b on 14 Nov, but it can be either after any rebuild or failover. Show it as "primary + standby" across the two AZs.
+- *After S4:* nothing structural. Check it against the final stack if anything changes in S4.
+
+**Cost estimate**
+
+- *Now:*
+  - Build it in the Pricing Calculator from §5, which now lists 5 CloudWatch alarms and no CPU-credit charges.
+  - For scale-out hours, take the instance-hours from the 2 extra instances as an assumption, e.g. 30 h/month as in §5.
+- *After S4:* compare it with the Lab credits actually used across S3 and S4, and put that comparison in the document.
