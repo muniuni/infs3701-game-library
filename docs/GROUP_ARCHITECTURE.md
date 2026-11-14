@@ -1,6 +1,6 @@
 # Group Architecture: Game Library on a Scalable, Highly Available AWS Stack
 
-Status: design locked 14 Nov 2026; D6 revised the same day from S3 measurements. S1–S3 done; S4 (evidence run) and S5 (documents) to go. Handover notes for the group are in §10. Due: Tuesday 17 Nov 2026, 4:00 pm (Sydney).
+Status: design locked 14 Nov 2026; D6 revised the same day from S3 measurements. S1–S3 done; S4 evidence run done 14 Nov (results in §9), apart from the video, which gets its own session; S5 (documents) to go. Handover notes for the group are in §10. Due: Tuesday 17 Nov 2026, 4:00 pm (Sydney).
 
 This document records what the group decided for the INFS3701 group assignment, why, and how the work is split into implementation sessions. It is the reference for every implementation session. Change it here first if a decision changes.
 
@@ -371,7 +371,7 @@ Rough order of magnitude: **~$170/month**, with the NAT gateways the largest sha
 | Single t3.small capacity | Load test (D6) | — (this sets the scaling target) **S3:** measured by the repository owner with `infra/load/capacity.js`. |
 | RDS offers the PostgreSQL major version used locally (18) on `db.t3.micro` | `aws rds describe-orderable-db-instance-options --engine postgres --engine-version 18.4 --db-instance-class db.t3.micro` | Use the newest major that is offered, and change `compose.yaml` to match **S3: yes.** RDS created 18.3 on db.t3.micro, Multi-AZ (primary 1b, standby 1a). No change to `compose.yaml`. |
 | Template size within the 51,200-byte inline limit | `aws cloudformation validate-template` | Upload the template to an S3 bucket first **S3: yes.** 26.5 KB, deployed inline. |
-| Secrets after a Reset | Second rebuild succeeds | Generated names already avoid clashes (D10) **Not yet testable;** checked by the S4 rebuild after the Reset. |
+| Secrets after a Reset | Second rebuild succeeds | Generated names already avoid clashes (D10) **S4 (14 Nov): works.** The rebuild after the S3 Reset reached `CREATE_COMPLETE` with no failed events. |
 | Node.js version on AL2023 | `dnf list nodejs*` | Install via `nvm` **S3: `nodejs24` package works** (Node v24.22.3, npm 11.19.1). No nvm needed. |
 | Pages work across instances (consistent build ID, D4) | Load one page's HTML, then fetch every `/_next/static/...` URL it references many times through the ALB. None may return 404 | Fix `generateBuildId`; check that both instances built the same SHA **S3: works.** The 8 `/_next/static/` URLs referenced by `/` were each fetched 6 times through the ALB: 48/48 returned 200, 24 from each AZ. |
 | DB TLS settings accepted by both Prisma Migrate and the `pg` adapter | `prisma migrate deploy` and the app both connect with RDS `force_ssl=1` | The wrapper builds a separate migrate URL in Prisma's TLS syntax (`sslmode=require&sslcert=<ca>&sslaccept=strict`) and passes `ssl: { ca, rejectUnauthorized: true }` to the adapter in code. Test this locally first against a TLS-enabled Docker Postgres in S2, so the first test isn't in a paid session. **S2 result (14 Nov, TLS-only Docker Postgres 18, self-signed CA):** the fallback is required. Prisma's engine treats `sslmode=verify-full` as no verification (it connected with a decoy CA), accepts any certificate unless `sslaccept=strict` is set, and can't read a multi-certificate bundle. A URL `sslmode` in node-postgres replaces the `ssl` object passed in code. Implemented: no TLS parameters in `DATABASE_URL`; TLS from `DATABASE_CA_FILE` (pg in code, Prisma in its own syntax); `infra/select-db-ca.sh` picks the single CA that verifies the endpoint. Migrate and app both pass with the right CA and fail with a decoy CA or a host-name mismatch **S3 (RDS, `rds.force_ssl=1`): both work.** Migrate applied the baseline over TLS, and `pg_stat_ssl` shows TLSv1.3 (`TLS_AES_256_GCM_SHA384`) for every app connection from both subnets. A plaintext connection is refused (`no pg_hba.conf entry … no encryption`), as is TLS without the RDS CA (`self-signed certificate in certificate chain`). |
@@ -498,14 +498,61 @@ Each session is a separate Claude Code session that starts by reading this docum
     - The 19% CPU at the top step is just under the t3.small CPU baseline (20%). Above that, a t3 in its default unlimited mode runs on surplus CPU credits, which are billed.
     - Scaling target: **decided 14 Nov (the repository owner)**. 1,500 req/min per instance on request count, plus a second policy at 20% average CPU. Defaults set in the template. Rationale and limitations are in D6.
 - [x] Smoke test: add a game, upload a cover, IGDB autofill, Steam import, export, and `X-Served-By` alternating. **Passed 14 Nov (the repository owner, browser):** all of them, with the footer badge alternating between instances.
-- [ ] Record credits, then **Reset the Lab**.
+- [x] Record credits, then **Reset the Lab**. Reset done (confirmed by the repository owner); credits not recorded here.
 
 ### S4. Evidence run (AWS)
 
-- [ ] Record credits, run a clean `deploy.sh`, confirm the SNS email, and capture the stack events timeline.
-- [ ] Run everything in §7 in order. Save logs, screenshots and dashboard graphs with timestamps into a local evidence folder (not committed if it contains account IDs).
-- [ ] Record the video while the stack runs (≤ 2:30).
-- [ ] Record credits, then **Reset the Lab**.
+- [x] Record credits, run a clean `deploy.sh`, confirm the SNS email, and capture the stack events timeline.
+- [x] Run everything in §7 in order. Save logs, screenshots and dashboard graphs with timestamps into a local evidence folder (not committed if it contains account IDs).
+- [ ] Record the video while the stack runs (≤ 2:30). **Moved to its own session** with a fresh deploy, because step 8 below leaves the ASG drifted from the template.
+- [ ] Record credits, then **Reset the Lab**. Credits before and after S4: *to be added by the repository owner.*
+
+How it was run (14 Nov, commit `7d1af5d`): the repository owner ran every command in their own terminal so the screenshots show the real output; each one was piped through `tee` into `evidence/s4-20261114/` (gitignored, it holds account IDs). Request logs come from `infra/evidence/probe.mjs`: one request every 250 ms on a fixed schedule, alternating `/api/health` (no DB) and `/api/games` (reads RDS), with a 10 s timeout, recording status and `X-Served-By`. Runbook and helper scripts are in `infra/evidence/`. All times are Sydney (AEDT).
+
+**S4 results** (key numbers for the design document; screenshots for the appendix are the repository owner's):
+
+1. **Build.** Stack `CREATE_COMPLETE` in 20 min 28 s (11:40:37 → 12:01:05), no failed events. RDS Multi-AZ took 16:49 of that; the ASG took 2:58 (both instances sent `cfn-signal` SUCCESS 2:47 after launch). The IGDB and Steam secrets were created without a name clash after the S3 Reset (§6).
+2. **Load distribution.** 20 sequential requests to `/`: 10 served by the 1a instance and 10 by the 1b instance, per `X-Served-By`.
+3. **IAM.** From an instance through Session Manager, as `assumed-role/LabRole/<instance-id>`:
+   - `aws s3 ls` on the bucket → `AccessDenied … s3:ListBucket … with an explicit deny in a resource-based policy`;
+   - `head-object` outside `covers/` → `403 Forbidden`;
+   - `head-object` on an uploaded cover → allowed (`image/jpeg`, `AES256`).
+4. **Data tier and security settings.**
+   - RDS: PostgreSQL 18.3 on db.t3.micro, Multi-AZ (primary 1a, standby 1b), `PubliclyAccessible: false`, storage encrypted (KMS), gp3 20 GiB, CA `rds-ca-rsa2048-g1`, managed master secret `active`, `rds.force_ssl = 1`.
+   - `pg_stat_ssl`: app connections `ssl = true`, `TLSv1.3`, `TLS_AES_256_GCM_SHA384`.
+   - SGs: ALB 80/443 from anywhere; app 80 from the ALB SG only; DB 5432 from the app SG only.
+   - Encryption at rest: EBS gp3 roots encrypted; S3 SSE-S3 with all four public-access blocks on.
+5. **Failover test (stop the 1b instance at 12:32:43).**
+   - **60 of 3,308 requests failed (1.81 %)** in the log from 12:30:22 to 12:44:11, all within 29.6 s after the stop (60 of the 119 sent in that window): 46 timed out after 10 s and 14 got a 502. They were in flight to, or routed to, the stopped instance before the ALB stopped using it. The target showed `unused` by 12:32:56.
+   - The ASG's EC2 health check caught the stopped instance at +1:46 and launched a replacement in 1b. The replacement served its first request at +4:57, 3:09 after launch.
+   - `HealthyHostCount` (1-min minimum) was 1 for the minutes 12:33–12:36. The alarm went **OK → ALARM at 12:37:00 (+4:17) and back to OK at 12:40:00**, and both emails arrived.
+   - The alarm lags by about 2 minutes after its second breaching minute closes, because of the delay before ALB metrics reach CloudWatch. So detection takes about 4 minutes. Self-healing doesn't wait for the alarm: the ASG acts on its own health checks.
+6. **Scale-out (Going Further).** k6 sent 90 req/s for 21 min with the D6 page mix, plus about 4 req/s from the probe.
+   - With 2 instances, each target got 2,820 req/min.
+   - The request-count High alarm fired at **+5:25**, and the policy set desired **2 → 4**. Both new instances (one per AZ) served at **+8:47**, 2:55–3:16 after launch.
+   - Each target then got about 1,410 req/min: below the 1,500 target and above the 1,350 scale-in line, so the group held at 4.
+   - k6 sent 113,382 requests with **0 % errors** (p95 281 ms from Sydney, mostly the WAN round trip). Server-side `TargetResponseTime` p95 stayed at 0.035–0.039 s.
+   - EC2 CPU peaked at 15.5 % (5-min average, 18.7 % max), so the CPU policy never acted; the request-count policy did all the scaling, as D6 intended.
+7. **Scale-in.** Load stopped at 13:10:08. The request-count Low alarm needs 15 datapoints below 1,350 and fired at 13:27:34; desired went 4 → 3 then, and 3 → 2 at 13:29:00. Back at 2 by 13:30:02, **about 20 min after the load stopped**.
+   - The probe logged **0 failed of 10,788** from load start to the end of scale-in: instances were drained (30 s deregistration) before termination.
+   - The CPU Low alarm (1-min period on a 5-min metric) did reach ALARM, so it didn't block scale-in.
+   - The probe's light traffic kept the Low alarm supplied with data. With no traffic at all, `RequestCountPerTarget` has no datapoints and the Low alarm stays `INSUFFICIENT_DATA`.
+8. **AZ-loss simulation (us-east-1a, which held the RDS primary).** At 13:40:53 three commands ran back to back:
+   - removed the 1a app subnet from the ASG;
+   - stopped the 1a instance;
+   - `reboot-db-instance --force-failover`.
+
+   Results:
+   - The ASG launched a replacement in 1b at 13:41:05, then terminated the 1a instance.
+   - RDS: failover started 13:41:07 and completed 13:41:51 (44 s by RDS events). The primary moved to 1b, and the standby is now in 1a.
+   - **53 of 2,244 requests failed (2.36 %)**, all within 24.1 s (13:40:57–13:41:21), split into:
+     - 14 × 502 and 15 × 504 generated by the ALB for the stopped 1a instance (the ALB's own `HTTPCode_ELB_502_Count` and `HTTPCode_ELB_504_Count` match);
+     - 12 × 500 on `/api/games` from the surviving 1b instance while the database failed over (13:41:12–13:41:21, about 9 s; matches `HTTPCode_Target_5XX_Count` = 12);
+     - 12 more `/api/games` requests hit the probe's 10 s limit without the ALB recording any error for them. Most likely they were waiting on the database on the 1b instance during the failover and answered after the probe gave up. All 5 `/api/health` failures were among the ALB's 504s, i.e. instance loss.
+   - `/api/health` had only 5 failures (timeouts, instance loss). The app reconnected to the new primary without a restart.
+   - The replacement served from 13:44:32, **3:39 after the start**. That is faster than step 5, because removing the subnet triggers the replacement at once rather than after an EC2 health check. Its boot overlapped the DB failover, and it still became healthy on its first boot.
+   - `HealthyHostCount` was 1 for 13:41–13:43. The alarm went **ALARM at 13:45:00 and OK at 13:47:00**, i.e. after the service had already healed, again because of the metric delay.
+   - Not reproduced (state in the doc): a real AZ outage would also take out that AZ's NAT gateway, ALB node and network, and RDS couldn't put the new standby in the failed AZ. After this test the ASG has one subnet, so the stack has drifted; it was not redeployed.
 
 ### S5. Documents (no AWS)
 
@@ -534,13 +581,13 @@ For whoever finalises the design document, the diagram and the cost estimate (S5
   - Scalability and the auto-scaling design, including the measured numbers and their limitations (D6, S3 in §9).
   - The cost section's structure and assumptions (§5).
   - The AI-use statement: CloudFormation was drafted with Claude Code from this document. Also the S3 build evidence: the first deploy's failure and fix, and the §6 results.
-- *After S4:*
-  - Failover and AZ-simulation results (failed requests and recovery times).
-  - The alarm firing and returning to OK, with the email.
-  - The scale-out graph from 2 to 3–4 instances and back.
-  - The refused S3 action from an instance.
-  - Screenshots for the appendix and the stack events timeline from the clean rebuild.
-  - The Lab credits used, for the cost section.
+- *After S4 (done 14 Nov; numbers in "S4 results" in §9, screenshots with the repository owner):*
+  - Failover and AZ-simulation results: failed requests and recovery times (results 5 and 8).
+  - The alarm firing and returning to OK, with the email (results 5 and 8). Also explain the ~2-minute metric delay.
+  - The scale-out from 2 to 4 instances and back (results 6 and 7), with the dashboard graphs.
+  - The refused S3 action from an instance (result 3).
+  - The stack events timeline from the clean rebuild (result 1).
+  - *Still open:* the Lab credits used, for the cost section.
 
 **Diagram**
 
