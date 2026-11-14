@@ -9,7 +9,7 @@ Single-user Next.js game library with Prisma/PostgreSQL persistence and cover up
 | [docs/GROUP_ARCHITECTURE.md](docs/GROUP_ARCHITECTURE.md) | The group design: scope and requirements (§1–2), architecture overview (§3), every decision with its rationale and trade-off (§4, D1–D16), cost and credits (§5), what was verified in AWS (§6), the evidence plan (§7), diagram changes (§8), implementation sessions and measurements (§9), and handover notes for the group (§10). | Yes. It is the source of truth; if it disagrees with another doc, it wins. |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | How the code is organised: stack, storage and database connection, API, credentials, IGDB/Steam/export internals, and the group runtime on EC2. | Yes |
 | [docs/DESIGN.md](docs/DESIGN.md) | The user interface: visual system, views, dialogs, responsive layout and accessibility. | Yes |
-| [infra/](infra/) | The group deployment as code: `game-library.yaml` (the single CloudFormation stack), `deploy.sh` (deploys it), `bootstrap.sh` (runs on each instance at boot), Nginx and systemd files, and `load/capacity.js` (the k6 capacity test). | Yes |
+| [infra/](infra/) | The group deployment as code: `game-library.yaml` (the single CloudFormation stack), `deploy.sh` (deploys it), `bootstrap.sh` (runs on each instance at boot), Nginx and systemd files, `load/capacity.js` (the k6 capacity test), and `evidence/` (the S4 evidence runbook and scripts). | Yes |
 | [docs/individual/](docs/individual/) | Archived individual-assignment documents: the product spec (`SPEC.md`) and the implementation plan (`IMPLEMENTATION_PLAN.md`). | No. Each file starts with a note on what is out of date. |
 | [deploy/individual/](deploy/individual/README.md) | Archived individual-assignment runbook for a single EC2 instance with SQLite on EBS and PM2. | No |
 
@@ -19,7 +19,7 @@ The assignment brief, the marking scheme and the group-approved architecture dia
 
 Give the AI only the files and sections listed for your deliverable. The "§" and "D" numbers refer to [docs/GROUP_ARCHITECTURE.md](docs/GROUP_ARCHITECTURE.md). Don't give it `docs/individual/` or `deploy/individual/`. They describe the old single-instance SQLite/EBS design and will mislead it. The one exception is the feature sections of `docs/individual/SPEC.md`, if you need detail on what the app does.
 
-The §10 items marked "After S4" (failover, alarm and scale-out results, and the credits used) don't exist until the evidence run is done.
+The S4 evidence run is done (14 Nov). Its results are in §9 under "S4 results", and the screenshots are with the repository owner. Of the §10 items marked "After S4", only the Lab credits used are still open.
 
 **Design document**
 
@@ -29,7 +29,8 @@ The §10 items marked "After S4" (failover, alarm and scale-out results, and the
   - §5 Cost and credits, for the cost section.
   - §6 Unknowns (the results recorded in AWS) and §7 Evidence plan.
   - §9 S3, for the measurements and the first deploy's failure and fix.
-  - §10 "Design document", for what is ready now and what waits for S4.
+  - §9 S4, "S4 results": the build, failover, alarm, scale-out and scale-in, and AZ-loss numbers.
+  - §10 "Design document", for which result goes in which section.
 - `docs/ARCHITECTURE.md`, sections "Group runtime on EC2", "Storage selection and lifecycle" and "Server credentials", for implementation detail.
 - Optional: `docs/individual/SPEC.md`, feature sections only (data model, library behaviour, IGDB, Steam, export), for describing the app.
 
@@ -105,7 +106,7 @@ Fill in `IGDB_CLIENT_ID`, `IGDB_CLIENT_SECRET` and `STEAM_WEB_API_KEY` with the 
 infra/deploy.sh
 ```
 
-Creating the stack takes about **25–35 minutes**, mostly the Multi-AZ database and the app build on each instance. The script waits until the app is serving, then prints the stack outputs, including the HTTPS URL. If creation fails, CloudFormation rolls back and deletes what it created. Run `infra/deploy.sh --disable-rollback` instead to keep the failed resources for inspection.
+Creating the stack takes about **20–35 minutes** (20.5 minutes in the 14 Nov run), mostly the Multi-AZ database and the app build on each instance. The script waits until the app is serving, then prints the stack outputs, including the HTTPS URL. If creation fails, CloudFormation rolls back and deletes what it created. Run `infra/deploy.sh --disable-rollback` instead to keep the failed resources for inspection.
 
 **4. Confirm the email.** You receive an "AWS Notification - Subscription Confirmation" email at `ALERT_EMAIL` (check spam). Click **Confirm subscription**, or the alarm emails won't arrive. You have to do this after every new deploy.
 
